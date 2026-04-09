@@ -43,6 +43,31 @@ function buildFormula(colName, rowNum) {
   }
 }
 
+const COLOMBIA_ORDER = [
+  "CODIGO",
+  "isrc_id",
+  "ARTISTA",
+  "CANCION",
+  "IMPACTOS",
+  "SONADAS",
+  "TOP",
+  "GENERO",
+];
+
+function reorderColombia(data) {
+  return data.map((row) => {
+    const ordered = {};
+    COLOMBIA_ORDER.forEach((col) => {
+      if (col in row) ordered[col] = row[col];
+    });
+    // Agregar columnas extra que no estén en el orden definido
+    Object.keys(row).forEach((col) => {
+      if (!COLOMBIA_ORDER.includes(col)) ordered[col] = row[col];
+    });
+    return ordered;
+  });
+}
+
 export function generateExcel(luminateData, colombiaData) {
   const workbook = XLSX.utils.book_new();
 
@@ -57,8 +82,18 @@ export function generateExcel(luminateData, colombiaData) {
 
   const worksheetData = [newHeaders];
 
+  const numericCols = new Set([
+    "WEIGHTED_AUDIO",
+    "WEIGHTED_VIDEO",
+    "WEIGHTED_SONG_SALES",
+  ]);
+
   luminateData.forEach((row) => {
-    const values = headers.map((h) => row[h] ?? "");
+    const values = headers.map((h) => {
+      const val = row[h] ?? "";
+      if (numericCols.has(h)) return val === "" ? 0 : Number(val);
+      return val;
+    });
     const newRow = [
       ...values.slice(0, insertAt),
       ...NEW_COLS.map(() => null),
@@ -80,7 +115,7 @@ export function generateExcel(luminateData, colombiaData) {
 
   XLSX.utils.book_append_sheet(workbook, luminateSheet, "Luminate");
 
-  const colombiaSheet = XLSX.utils.json_to_sheet(colombiaData);
+  const colombiaSheet = XLSX.utils.json_to_sheet(reorderColombia(colombiaData));
   XLSX.utils.book_append_sheet(workbook, colombiaSheet, "Colombia Radio");
 
   const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });

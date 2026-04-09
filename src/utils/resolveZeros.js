@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { saveAs } from "file-saver";
 
 function normalize(str) {
   return String(str ?? "")
@@ -8,7 +9,7 @@ function normalize(str) {
     .trim();
 }
 
-function findBestMatch(title, colombiaData) {
+export function findBestMatch(title, colombiaData) {
   const normalTitle = normalize(title);
 
   const matches = colombiaData.filter((row) => {
@@ -40,86 +41,140 @@ function colLetter(index) {
   return letter;
 }
 
-export function resolveZeros(calculatedFile, colombiaData) {
+export function extractZeroRows(calculatedData, colombiaData) {
+  // Solo primeras 100 canciones
+  const first100 = calculatedData.slice(0, 100);
+
+  return first100
+    .map((row, i) => {
+      const rowNum = i + 2;
+      const radioImpact = Number(row["Radio Impact Col"] ?? 0);
+      if (radioImpact !== 0) return null;
+
+      const title = row["TITLE"] ?? "";
+      const { best, matches } = findBestMatch(title, colombiaData);
+
+      const artist = row["ARTIST"] ?? "";
+      return {
+        rowNum,
+        title,
+        artist,
+        best: best
+          ? {
+              cancion: best["CANCION"],
+              impactos: Number(best["IMPACTOS"] ?? 0),
+              sonadas: Number(best["SONADAS"] ?? 0),
+              top: Number(best["TOP"] ?? 0),
+            }
+          : null,
+        options: matches
+          .map((m) => ({
+            cancion: m["CANCION"] ?? "",
+            artista: m["ARTISTA"] ?? "",
+            impactos: Number(m["IMPACTOS"] ?? 0),
+            sonadas: Number(m["SONADAS"] ?? 0),
+            top: Number(m["TOP"] ?? 0),
+          }))
+          .sort((a, b) => b.impactos - a.impactos),
+      };
+    })
+    .filter(Boolean);
+}
+
+export function applyResolutions(workbook, resolutions) {
+  const luminateSheet = workbook.Sheets["Luminate"];
+  const insertAt = 16;
+
+  Object.entries(resolutions).forEach(([rowNum, values]) => {
+    const { impactos, sonadas, top } = values;
+    const radioWeighted = impactos / 27;
+    const j = Number(values.j ?? 0);
+    const n = Number(values.n ?? 0);
+    const p = Number(values.p ?? 0);
+    const consumption = j + n + p;
+    const totWithRadio = radioWeighted + consumption;
+    const radioPercent = totWithRadio !== 0 ? radioWeighted / totWithRadio : 0;
+
+    const directValues = [
+      impactos,
+      radioWeighted,
+      sonadas,
+      top,
+      consumption,
+      totWithRadio,
+      radioPercent,
+    ];
+
+    directValues.forEach((val, j) => {
+      const colIndex = insertAt + j;
+      const cellRef = `${colLetter(colIndex)}${rowNum}`;
+      luminateSheet[cellRef] = { t: "n", v: val };
+    });
+  });
+
+  return workbook;
+}
+
+export function sortByTotWithRadio(workbook) {
+  const sheet = workbook.Sheets["Luminate"];
+  const data = XLSX.utils.sheet_to_json(sheet);
+
+  data.sort((a, b) => {
+    const aVal = Number(a["Tot w/ Radio"] ?? 0);
+    const bVal = Number(b["Tot w/ Radio"] ?? 0);
+    return bVal - aVal;
+  });
+
+  const newSheet = XLSX.utils.json_to_sheet(data);
+  workbook.Sheets["Luminate"] = newSheet;
+  return workbook;
+}
+
+export function applyTableStyle(workbook) {
+  const sheet = workbook.Sheets["Luminate"];
+  const ref = sheet["!ref"];
+  if (!ref) return workbook;
+
+  if (!sheet["!tables"]) sheet["!tables"] = [];
+  sheet["!tables"].push({
+    name: "TablHot100",
+    ref: ref,
+    headerRow: true,
+    totalsRow: false,
+    style: {
+      name: "TableStyleMedium9",
+      showFirstColumn: false,
+      showLastColumn: false,
+      showRowStripes: true,
+      showColumnStripes: false,
+    },
+  });
+
+  return workbook;
+}
+
+export function downloadResolved(workbook, fileName = "Hot 100 Final.xlsx") {
+  const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  saveAs(blob, fileName);
+}
+
+export function readWorkbook(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-
-    reader.onload = async (e) => {
+    reader.onload = (e) => {
       try {
         const workbook = XLSX.read(e.target.result, { type: "binary" });
-        const luminateSheet = workbook.Sheets["Luminate"];
-        const luminateData = XLSX.utils.sheet_to_json(luminateSheet);
-
-        const matchReport = [];
-        const insertAt = 16; // columna Q
-
-        luminateData.forEach((row, i) => {
-          const rowNum = i + 2;
-          const title = row["TITLE"] ?? "";
-          const radioImpact = Number(row["Radio Impact Col"] ?? 0);
-
-          if (radioImpact === 0) {
-            const { best, matches } = findBestMatch(title, colombiaData);
-
-            const impactos = best ? Number(best["IMPACTOS"] ?? 0) : 0;
-            const radioWeighted = impactos / 27;
-            const sonadas = best ? Number(best["SONADAS"] ?? 0) : 0;
-            const top = best ? Number(best["TOP"] ?? 0) : 0;
-
-            const j = Number(row[Object.keys(row)[9]] ?? 0);
-            const n = Number(row[Object.keys(row)[13]] ?? 0);
-            const p = Number(row[Object.keys(row)[15]] ?? 0);
-            const consumption = j + n + p;
-            const totWithRadio = radioWeighted + consumption;
-            const radioPercent =
-              totWithRadio !== 0 ? radioWeighted / totWithRadio : 0;
-
-            const directValues = [
-              impactos,
-              radioWeighted,
-              sonadas,
-              top,
-              consumption,
-              totWithRadio,
-              radioPercent,
-            ];
-
-            directValues.forEach((val, j) => {
-              const colIndex = insertAt + j;
-              const cellRef = `${colLetter(colIndex)}${rowNum}`;
-              luminateSheet[cellRef] = { t: "n", v: val };
-            });
-
-            matchReport.push({
-              title,
-              chosen: best ? best["CANCION"] : "Sin coincidencia",
-              impactos,
-              totalOptions: matches.length,
-              options: matches.map((m) => ({
-                cancion: m["CANCION"] ?? "",
-                impactos: Number(m["IMPACTOS"] ?? 0),
-              })),
-            });
-          }
-        });
-
-        const { saveAs } = await import("file-saver");
-        const buffer = XLSX.write(workbook, {
-          bookType: "xlsx",
-          type: "array",
-        });
-        const blob = new Blob([buffer], {
-          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        });
-        saveAs(blob, "Hot 100 Final.xlsx");
-
-        resolve(matchReport);
+        const sheet = workbook.Sheets["Luminate"];
+        const data = XLSX.utils.sheet_to_json(sheet);
+        resolve({ workbook, data });
       } catch (err) {
         reject(err);
       }
     };
-
     reader.onerror = (err) => reject(err);
-    reader.readAsBinaryString(calculatedFile);
+    reader.readAsBinaryString(file);
   });
 }
