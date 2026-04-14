@@ -28,6 +28,8 @@ const useStore = create((set) => ({
     })),
 
   nextRow: () => set((state) => ({ currentIndex: state.currentIndex + 1 })),
+  prevRow: () =>
+    set((state) => ({ currentIndex: Math.max(0, state.currentIndex - 1) })),
 
   reset: () =>
     set({

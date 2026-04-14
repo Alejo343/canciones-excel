@@ -25,6 +25,7 @@ export default function Step2() {
     resolutions,
     resolveRow,
     nextRow,
+    prevRow,
   } = useStore();
 
   const [phase, setPhase] = useState("upload"); // upload | review
@@ -193,6 +194,17 @@ export default function Step2() {
             </p>
           </div>
           <button
+            onClick={prevRow}
+            disabled={currentIndex === 0}
+            className={`font-semibold py-2 px-4 rounded-xl transition-all text-sm border ${
+              currentIndex === 0
+                ? "border-gray-800 text-gray-700 cursor-not-allowed"
+                : "border-gray-700 bg-gray-900 hover:bg-gray-800 text-gray-400"
+            }`}
+          >
+            ← Anterior
+          </button>
+          <button
             onClick={handleAbort}
             className="bg-red-500 bg-opacity-10 hover:bg-opacity-20 border border-red-900 text-red-400 font-semibold py-2 px-4 rounded-xl transition-all text-sm"
           >
@@ -236,7 +248,8 @@ export default function Step2() {
                         })
                       }
                       className={`flex items-center justify-between px-4 py-3 rounded-xl border transition-all text-left ${
-                        opt.cancion === currentRow.best?.cancion
+                        opt.cancion === currentRow.best?.cancion &&
+                        opt.artista === currentRow.best?.artista
                           ? "border-green-700 bg-green-500 bg-opacity-10 text-green-300"
                           : "border-gray-700 bg-gray-800 text-gray-300 hover:border-gray-500"
                       }`}
@@ -249,9 +262,11 @@ export default function Step2() {
                         <span>{opt.impactos.toLocaleString()} imp</span>
                         <span>{opt.sonadas.toLocaleString()} son</span>
                         <span>Top {opt.top}</span>
-                        {opt.cancion === currentRow.best?.cancion && (
-                          <span className="text-green-500 font-bold">★</span>
-                        )}
+                        <span className="text-gray-600">score {opt.score}</span>
+                        {opt.cancion === currentRow.best?.cancion &&
+                          opt.artista === currentRow.best?.artista && (
+                            <span className="text-green-500 font-bold">★</span>
+                          )}
                       </div>
                     </button>
                   ))}

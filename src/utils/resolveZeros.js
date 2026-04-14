@@ -9,25 +9,90 @@ function normalize(str) {
     .trim();
 }
 
-export function findBestMatch(title, colombiaData) {
+export function findBestMatch(title, artist, colombiaData) {
   const normalTitle = normalize(title);
+  const normalArtist = normalize(artist ?? "");
 
-  const matches = colombiaData.filter((row) => {
-    const normalCancion = normalize(row["CANCION"]);
-    return (
-      normalCancion.includes(normalTitle) || normalTitle.includes(normalCancion)
-    );
+  function titleScore(cancion) {
+    const normalCancion = normalize(cancion);
+
+    // Match exacto
+    if (normalCancion === normalTitle) return 70;
+
+    // Título de Luminate contenido en Colombia Radio
+    if (normalCancion.includes(normalTitle)) {
+      const coverage = normalTitle.length / normalCancion.length;
+      if (coverage >= 0.4) return Math.round(60 * coverage);
+      return 0;
+    }
+
+    // Título de Colombia Radio contenido en Luminate
+    if (normalTitle.includes(normalCancion)) {
+      const coverage = normalCancion.length / normalTitle.length;
+      if (coverage >= 0.8) return Math.round(55 * coverage);
+      return 0;
+    }
+
+    return 0;
+  }
+
+  function artistScore(artista) {
+    const normalArtistCol = normalize(artista ?? "");
+    if (!normalArtist || !normalArtistCol) return 0;
+
+    // Dividir artistas por coma o slash
+    const artistsLuminate = normalArtist
+      .replace(/"/g, "")
+      .split(/[,/&]/)
+      .map((a) => a.trim());
+    const artistsColombia = normalArtistCol
+      .replace(/"/g, "")
+      .split(/[,/&]/)
+      .map((a) => a.trim());
+
+    let score = 0;
+    for (const a of artistsLuminate) {
+      for (const b of artistsColombia) {
+        if (a === b) {
+          score = 30;
+          break;
+        }
+        if (a.includes(b) || b.includes(a)) {
+          score = Math.max(score, 15);
+        }
+      }
+    }
+    return score;
+  }
+
+  const scored = colombiaData
+    .map((row) => {
+      const ts = titleScore(row["CANCION"] ?? "");
+      if (ts === 0) return null;
+      const as = artistScore(row["ARTISTA"] ?? "");
+      return { row, score: ts + as, titleScore: ts, artistScore: as };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score);
+
+  if (scored.length === 0) return { best: null, matches: [] };
+
+  const matches = scored.map((s) => ({
+    cancion: s.row["CANCION"] ?? "",
+    artista: s.row["ARTISTA"] ?? "",
+    impactos: Number(s.row["IMPACTOS"] ?? 0),
+    sonadas: Number(s.row["SONADAS"] ?? 0),
+    top: Number(s.row["TOP"] ?? 0),
+    score: s.score,
+  }));
+
+  const sorted = [...scored].sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    if (b.artistScore !== a.artistScore) return b.artistScore - a.artistScore;
+    return Number(b.row["IMPACTOS"] ?? 0) - Number(a.row["IMPACTOS"] ?? 0);
   });
 
-  if (matches.length === 0) return { best: null, matches: [] };
-
-  const best = matches.reduce((prev, curr) => {
-    return Number(curr["IMPACTOS"] ?? 0) > Number(prev["IMPACTOS"] ?? 0)
-      ? curr
-      : prev;
-  });
-
-  return { best, matches };
+  return { best: sorted[0].row, matches };
 }
 
 function colLetter(index) {
@@ -42,7 +107,6 @@ function colLetter(index) {
 }
 
 export function extractZeroRows(calculatedData, colombiaData) {
-  // Solo primeras 100 canciones
   const first100 = calculatedData.slice(0, 100);
 
   return first100
@@ -52,9 +116,9 @@ export function extractZeroRows(calculatedData, colombiaData) {
       if (radioImpact !== 0) return null;
 
       const title = row["TITLE"] ?? "";
-      const { best, matches } = findBestMatch(title, colombiaData);
-
       const artist = row["ARTIST"] ?? "";
+      const { best, matches } = findBestMatch(title, artist, colombiaData);
+
       return {
         rowNum,
         title,
@@ -62,20 +126,13 @@ export function extractZeroRows(calculatedData, colombiaData) {
         best: best
           ? {
               cancion: best["CANCION"],
+              artista: best["ARTISTA"],
               impactos: Number(best["IMPACTOS"] ?? 0),
               sonadas: Number(best["SONADAS"] ?? 0),
               top: Number(best["TOP"] ?? 0),
             }
           : null,
-        options: matches
-          .map((m) => ({
-            cancion: m["CANCION"] ?? "",
-            artista: m["ARTISTA"] ?? "",
-            impactos: Number(m["IMPACTOS"] ?? 0),
-            sonadas: Number(m["SONADAS"] ?? 0),
-            top: Number(m["TOP"] ?? 0),
-          }))
-          .sort((a, b) => b.impactos - a.impactos),
+        options: matches,
       };
     })
     .filter(Boolean);
