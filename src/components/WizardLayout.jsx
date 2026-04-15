@@ -1,4 +1,4 @@
-import { useLocation } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 
 const steps = [
   { number: 1, label: "Subir archivos", path: "/step1" },
@@ -8,6 +8,7 @@ const steps = [
 
 export default function WizardLayout({ children }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const currentStep = steps.findIndex((s) => s.path === location.pathname) + 1;
 
   return (
@@ -30,7 +31,10 @@ export default function WizardLayout({ children }) {
         <div className="max-w-3xl mx-auto flex items-center gap-0">
           {steps.map((step, i) => (
             <div key={step.number} className="flex items-center flex-1">
-              <div className="flex items-center gap-3">
+              <div
+                className="flex items-center gap-3 cursor-pointer"
+                onClick={() => navigate(step.path)}
+              >
                 <div
                   className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all ${
                     currentStep === step.number

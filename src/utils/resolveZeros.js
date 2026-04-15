@@ -5,6 +5,8 @@ function normalize(str) {
   return String(str ?? "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/['''`.]/g, "")
+    .replace(/\s+/g, " ")
     .toUpperCase()
     .trim();
 }
@@ -72,8 +74,7 @@ export function findBestMatch(title, artist, colombiaData) {
       const as = artistScore(row["ARTISTA"] ?? "");
       return { row, score: ts + as, titleScore: ts, artistScore: as };
     })
-    .filter(Boolean)
-    .sort((a, b) => b.score - a.score);
+    .filter(Boolean);
 
   if (scored.length === 0) return { best: null, matches: [] };
 
@@ -91,6 +92,26 @@ export function findBestMatch(title, artist, colombiaData) {
     if (b.artistScore !== a.artistScore) return b.artistScore - a.artistScore;
     return Number(b.row["IMPACTOS"] ?? 0) - Number(a.row["IMPACTOS"] ?? 0);
   });
+
+  // Si ninguna opción tiene coincidencia de artista, no mostrar nada
+  const anyArtistMatch = sorted.some((s) => s.artistScore > 0);
+  if (!anyArtistMatch) return { best: null, matches: [] };
+  console.log(
+    `[${normalTitle}] anyArtistMatch: ${anyArtistMatch}`,
+    sorted.map((s) => ({
+      cancion: s.row["CANCION"],
+      artista: s.row["ARTISTA"],
+      artistScore: s.artistScore,
+    })),
+  );
+  if (!anyArtistMatch) return { best: null, matches };
+
+  // Si el mejor tiene 0 impactos, buscar uno con impactos dentro del mismo score de título
+  const best = sorted[0];
+  if (Number(best.row["IMPACTOS"] ?? 0) === 0) {
+    const withImpactos = sorted.find((s) => Number(s.row["IMPACTOS"] ?? 0) > 0);
+    if (withImpactos) return { best: withImpactos.row, matches };
+  }
 
   return { best: sorted[0].row, matches };
 }
@@ -132,7 +153,22 @@ export function extractZeroRows(calculatedData, colombiaData) {
               top: Number(best["TOP"] ?? 0),
             }
           : null,
-        options: matches,
+        options: best
+          ? [
+              matches.find(
+                (m) =>
+                  m.cancion === best["CANCION"] &&
+                  m.artista === best["ARTISTA"],
+              ),
+              ...matches.filter(
+                (m) =>
+                  !(
+                    m.cancion === best["CANCION"] &&
+                    m.artista === best["ARTISTA"]
+                  ),
+              ),
+            ].filter(Boolean)
+          : matches,
       };
     })
     .filter(Boolean);
@@ -224,9 +260,18 @@ export function readWorkbook(file) {
     reader.onload = (e) => {
       try {
         const workbook = XLSX.read(e.target.result, { type: "binary" });
-        const sheet = workbook.Sheets["Luminate"];
-        const data = XLSX.utils.sheet_to_json(sheet);
-        resolve({ workbook, data });
+
+        const luminateSheet = workbook.Sheets["Luminate"];
+        const colombiaSheet = workbook.Sheets["Colombia Radio"];
+
+        if (!luminateSheet) throw new Error("No se encontró la hoja Luminate");
+        if (!colombiaSheet)
+          throw new Error("No se encontró la hoja Colombia Radio");
+
+        const luminateData = XLSX.utils.sheet_to_json(luminateSheet);
+        const colombiaData = XLSX.utils.sheet_to_json(colombiaSheet);
+
+        resolve({ workbook, data: luminateData, colombiaData });
       } catch (err) {
         reject(err);
       }

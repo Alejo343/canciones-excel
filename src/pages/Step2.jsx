@@ -15,6 +15,7 @@ export default function Step2() {
   const navigate = useNavigate();
   const {
     colombiaData,
+    setColombaData,
     calculatedFile,
     setCalculatedFile,
     setMatchReport,
@@ -49,8 +50,14 @@ export default function Step2() {
   const handleStartReview = async () => {
     try {
       setLoading(true);
-      const { workbook: wb, data } = await readWorkbook(calculatedFile);
-      const zeros = extractZeroRows(data, colombiaData);
+      const {
+        workbook: wb,
+        data,
+        colombiaData: colombiaFromFile,
+      } = await readWorkbook(calculatedFile);
+      const resolvedColombia = colombiaData ?? colombiaFromFile;
+      setColombaData(resolvedColombia);
+      const zeros = extractZeroRows(data, resolvedColombia);
       setWorkbook(wb);
       setCalculatedData(data);
       setZeroRows(zeros);
