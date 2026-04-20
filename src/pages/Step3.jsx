@@ -1,9 +1,26 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import useStore from "../store/useStore";
+import { uploadToDrive } from "../utils/googleDrive";
 
 export default function Step3() {
   const navigate = useNavigate();
-  const { matchReport, reset } = useStore();
+  const { matchReport, finalBuffer, reset } = useStore();
+  const [driveStatus, setDriveStatus] = useState("idle"); // idle | loading | done | error
+  const [driveLink, setDriveLink] = useState(null);
+
+  const handleUploadDrive = async () => {
+    if (!finalBuffer) return;
+    setDriveStatus("loading");
+    try {
+      const link = await uploadToDrive(finalBuffer, "Hot 100 Final");
+      setDriveLink(link);
+      setDriveStatus("done");
+    } catch (err) {
+      console.error(err);
+      setDriveStatus("error");
+    }
+  };
 
   const noMatch = matchReport?.filter((r) => r.totalOptions === 0) ?? [];
   const withMatch = matchReport?.filter((r) => r.totalOptions > 0) ?? [];
@@ -114,6 +131,37 @@ export default function Step3() {
         >
           Nuevo reporte
         </button>
+
+        {/* Subir a Google Drive */}
+        {driveStatus === "done" ? (
+          <a
+            href={driveLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-4 px-6 rounded-2xl transition-all text-lg text-center"
+          >
+            Abrir en Google Sheets →
+          </a>
+        ) : (
+          <button
+            onClick={handleUploadDrive}
+            disabled={driveStatus === "loading" || !finalBuffer}
+            className={`w-full font-semibold py-4 px-6 rounded-2xl transition-all text-lg ${
+              driveStatus === "loading" || !finalBuffer
+                ? "bg-gray-700 text-gray-500 cursor-not-allowed"
+                : driveStatus === "error"
+                  ? "bg-red-500 hover:bg-red-400 text-white"
+                  : "bg-white hover:bg-gray-100 text-gray-900"
+            }`}
+          >
+            {driveStatus === "loading"
+              ? "Subiendo a Drive..."
+              : driveStatus === "error"
+                ? "Error — reintentar"
+                : "Subir a Google Drive"}
+          </button>
+        )}
+
         <button
           onClick={() => navigate("/step2")}
           className="w-full bg-gray-900 hover:bg-gray-800 border border-gray-700 text-gray-400 font-semibold py-3 px-6 rounded-2xl transition-all text-sm"

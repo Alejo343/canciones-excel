@@ -6,6 +6,7 @@ const useStore = create((set) => ({
   colombiaData: null,
   calculatedFile: null,
   matchReport: [],
+  finalBuffer: null,
 
   // Proceso de revisión
   zeroRows: [], // filas que quedaron en 0 dentro de las primeras 100
@@ -17,6 +18,7 @@ const useStore = create((set) => ({
   setColombaData: (data) => set({ colombiaData: data }),
   setCalculatedFile: (file) => set({ calculatedFile: file }),
   setMatchReport: (report) => set({ matchReport: report }),
+  setFinalBuffer: (buffer) => set({ finalBuffer: buffer }),
 
   // Setters revisión
   setZeroRows: (rows) => set({ zeroRows: rows }),
@@ -37,6 +39,7 @@ const useStore = create((set) => ({
       colombiaData: null,
       calculatedFile: null,
       matchReport: [],
+      finalBuffer: null,
       zeroRows: [],
       currentIndex: 0,
       resolutions: {},

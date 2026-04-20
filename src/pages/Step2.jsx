@@ -8,6 +8,7 @@ import {
   sortByTotWithRadio,
   applyTableStyle,
   downloadResolved,
+  getWorkbookBuffer,
   readWorkbook,
 } from "../utils/resolveZeros";
 
@@ -19,6 +20,7 @@ export default function Step2() {
     calculatedFile,
     setCalculatedFile,
     setMatchReport,
+    setFinalBuffer,
     zeroRows,
     setZeroRows,
     currentIndex,
@@ -102,6 +104,7 @@ export default function Step2() {
       options: r.options,
     }));
     setMatchReport(report);
+    setFinalBuffer(getWorkbookBuffer(resolved));
     downloadResolved(resolved);
     navigate("/step3");
   };

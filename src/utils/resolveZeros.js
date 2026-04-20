@@ -312,8 +312,12 @@ export function applyTableStyle(workbook) {
   return workbook;
 }
 
+export function getWorkbookBuffer(workbook) {
+  return XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+}
+
 export function downloadResolved(workbook, fileName = "Hot 100 Final.xlsx") {
-  const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+  const buffer = getWorkbookBuffer(workbook);
   const blob = new Blob([buffer], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
