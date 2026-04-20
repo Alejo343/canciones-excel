@@ -31,7 +31,7 @@ function headerStyleR(isNewCol) {
   };
 }
 
-function dataStyleR(isNewCol, isEvenRow, isPercentCol = false) {
+function dataStyleR(isNewCol, isEvenRow, isPercentCol = false, colIndex = -1) {
   let rgb;
   if (isNewCol) rgb = isEvenRow ? "FCE4D6" : "FFF2CC";
   else rgb = isEvenRow ? "D9E1F2" : "FFFFFF";
@@ -42,6 +42,8 @@ function dataStyleR(isNewCol, isEvenRow, isPercentCol = false) {
     border: THIN_BORDER,
   };
   if (isPercentCol) style.numFmt = "0.00%";
+  else if ((colIndex >= 6 && colIndex <= 21) || (colIndex >= 23 && colIndex <= 25))
+    style.numFmt = "#,##0";
   return style;
 }
 
@@ -54,7 +56,7 @@ function applyLuminateStyles(sheet, totalRows, totalCols) {
     if (sheet[headerRef]) sheet[headerRef].s = headerStyleR(isNewCol);
     for (let r = 2; r <= totalRows + 1; r++) {
       const cellRef = `${colLetter(c)}${r}`;
-      if (sheet[cellRef]) sheet[cellRef].s = dataStyleR(isNewCol, r % 2 === 0, isPercentCol);
+      if (sheet[cellRef]) sheet[cellRef].s = dataStyleR(isNewCol, r % 2 === 0, isPercentCol, c);
     }
   }
 }
@@ -252,7 +254,7 @@ export function applyResolutions(workbook, resolutions) {
       luminateSheet[cellRef] = {
         t: "n",
         v: val,
-        s: dataStyleR(true, rowNum % 2 === 0, isPercentCol),
+        s: dataStyleR(true, rowNum % 2 === 0, isPercentCol, colIndex),
       };
     });
   });
@@ -270,8 +272,8 @@ export function sortByTotWithRadio(workbook) {
   const data = XLSX.utils.sheet_to_json(sheet);
 
   data.sort((a, b) => {
-    const aVal = Number(a["TOTAL"] ?? 0);
-    const bVal = Number(b["TOTAL"] ?? 0);
+    const aVal = Number(a["Tot w/ Radio"] ?? 0);
+    const bVal = Number(b["Tot w/ Radio"] ?? 0);
     return bVal - aVal;
   });
 

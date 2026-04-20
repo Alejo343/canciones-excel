@@ -59,7 +59,7 @@ function headerStyle(isNewCol) {
   };
 }
 
-function dataStyle(isNewCol, isEvenRow, isPercentCol = false) {
+function dataStyle(isNewCol, isEvenRow, isPercentCol = false, colIndex = -1) {
   let rgb;
   if (isNewCol) rgb = isEvenRow ? "FCE4D6" : "FFF2CC";
   else rgb = isEvenRow ? "D9E1F2" : "FFFFFF";
@@ -70,6 +70,8 @@ function dataStyle(isNewCol, isEvenRow, isPercentCol = false) {
     border: THIN_BORDER,
   };
   if (isPercentCol) style.numFmt = "0.00%";
+  else if ((colIndex >= 6 && colIndex <= 21) || (colIndex >= 23 && colIndex <= 25))
+    style.numFmt = "#,##0";
   return style;
 }
 
@@ -82,7 +84,7 @@ function applySheetStyles(sheet, totalCols, totalRows, newColStart, newColEnd) {
     if (sheet[headerRef]) sheet[headerRef].s = headerStyle(isNewCol);
     for (let r = 2; r <= totalRows + 1; r++) {
       const cellRef = `${colLetter(c)}${r}`;
-      if (sheet[cellRef]) sheet[cellRef].s = dataStyle(isNewCol, r % 2 === 0, isPercentCol);
+      if (sheet[cellRef]) sheet[cellRef].s = dataStyle(isNewCol, r % 2 === 0, isPercentCol, c);
     }
   }
 }
