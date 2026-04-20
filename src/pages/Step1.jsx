@@ -105,6 +105,14 @@ export default function Step1() {
         )}
       </div>
 
+      {/* Saltar al paso 2 */}
+      <button
+        onClick={() => navigate("/step2")}
+        className="w-full bg-gray-900 hover:bg-gray-800 border border-gray-700 text-gray-400 font-semibold py-3 px-6 rounded-2xl transition-all text-sm"
+      >
+        Ya tengo el Hot 100.xlsx → ir al Paso 2
+      </button>
+
       {/* Exportar */}
       {canExport && (
         <div className="flex flex-col gap-3">

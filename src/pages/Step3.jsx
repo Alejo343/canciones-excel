@@ -32,6 +32,36 @@ export default function Step3() {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Subir a Google Drive */}
+      {driveStatus === "done" ? (
+        <a
+          href={driveLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-4 px-6 rounded-2xl transition-all text-lg text-center"
+        >
+          Abrir en Google Sheets →
+        </a>
+      ) : (
+        <button
+          onClick={handleUploadDrive}
+          disabled={driveStatus === "loading" || !finalBuffer}
+          className={`w-full font-semibold py-4 px-6 rounded-2xl transition-all text-lg ${
+            driveStatus === "loading" || !finalBuffer
+              ? "bg-gray-700 text-gray-500 cursor-not-allowed"
+              : driveStatus === "error"
+                ? "bg-red-500 hover:bg-red-400 text-white"
+                : "bg-white hover:bg-gray-100 text-gray-900"
+          }`}
+        >
+          {driveStatus === "loading"
+            ? "Subiendo a Drive..."
+            : driveStatus === "error"
+              ? "Error — reintentar"
+              : "Subir a Google Drive"}
+        </button>
+      )}
+
       <div>
         <h2 className="text-2xl font-bold text-white mb-1">Reporte</h2>
         <p className="text-gray-400 text-sm">
@@ -131,36 +161,6 @@ export default function Step3() {
         >
           Nuevo reporte
         </button>
-
-        {/* Subir a Google Drive */}
-        {driveStatus === "done" ? (
-          <a
-            href={driveLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-4 px-6 rounded-2xl transition-all text-lg text-center"
-          >
-            Abrir en Google Sheets →
-          </a>
-        ) : (
-          <button
-            onClick={handleUploadDrive}
-            disabled={driveStatus === "loading" || !finalBuffer}
-            className={`w-full font-semibold py-4 px-6 rounded-2xl transition-all text-lg ${
-              driveStatus === "loading" || !finalBuffer
-                ? "bg-gray-700 text-gray-500 cursor-not-allowed"
-                : driveStatus === "error"
-                  ? "bg-red-500 hover:bg-red-400 text-white"
-                  : "bg-white hover:bg-gray-100 text-gray-900"
-            }`}
-          >
-            {driveStatus === "loading"
-              ? "Subiendo a Drive..."
-              : driveStatus === "error"
-                ? "Error — reintentar"
-                : "Subir a Google Drive"}
-          </button>
-        )}
 
         <button
           onClick={() => navigate("/step2")}

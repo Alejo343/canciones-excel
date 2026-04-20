@@ -2,6 +2,9 @@ const CLIENT_ID =
   "565902326058-ce9j42bs2lgvqu9pr1i3jdd9ckptbite.apps.googleusercontent.com";
 const SCOPE = "https://www.googleapis.com/auth/drive.file";
 
+let cachedToken = null;
+let tokenExpiry = 0;
+
 function loadGIS() {
   return new Promise((resolve) => {
     if (window.google?.accounts) return resolve();
@@ -12,20 +15,30 @@ function loadGIS() {
   });
 }
 
-export async function uploadToDrive(buffer, fileName) {
+async function getToken() {
+  if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
+
   await loadGIS();
 
-  const token = await new Promise((resolve, reject) => {
+  return new Promise((resolve, reject) => {
     const client = window.google.accounts.oauth2.initTokenClient({
       client_id: CLIENT_ID,
       scope: SCOPE,
       callback: (resp) => {
         if (resp.error) reject(new Error(resp.error));
-        else resolve(resp.access_token);
+        else {
+          cachedToken = resp.access_token;
+          tokenExpiry = Date.now() + (resp.expires_in ?? 3600) * 1000 - 60_000;
+          resolve(cachedToken);
+        }
       },
     });
-    client.requestAccessToken({ prompt: "consent" });
+    client.requestAccessToken({ prompt: "" });
   });
+}
+
+export async function uploadToDrive(buffer, fileName) {
+  const token = await getToken();
 
   const metadata = {
     name: fileName,

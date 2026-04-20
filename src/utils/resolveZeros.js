@@ -264,28 +264,69 @@ export function applyResolutions(workbook, resolutions) {
 
 export function sortByTotWithRadio(workbook) {
   const sheet = workbook.Sheets["Luminate"];
+  const range = XLSX.utils.decode_range(sheet["!ref"]);
 
-  const allRows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-  const rankColName = allRows[0]?.[2];
-  const totalCols = allRows[0]?.length ?? 0;
-
-  const data = XLSX.utils.sheet_to_json(sheet);
-
-  data.sort((a, b) => {
-    const aVal = Number(a["Tot w/ Radio"] ?? 0);
-    const bVal = Number(b["Tot w/ Radio"] ?? 0);
-    return bVal - aVal;
-  });
-
-  if (rankColName) {
-    data.forEach((row, i) => {
-      row[rankColName] = i + 1;
-    });
+  // Find "Tot w/ Radio" column index from header row
+  let totColIndex = -1;
+  for (let c = 0; c <= range.e.c; c++) {
+    const cell = sheet[XLSX.utils.encode_cell({ r: 0, c })];
+    if (cell?.v === "Tot w/ Radio") { totColIndex = c; break; }
   }
 
-  const newSheet = XLSX.utils.json_to_sheet(data);
-  applyLuminateStyles(newSheet, data.length, totalCols);
-  workbook.Sheets["Luminate"] = newSheet;
+  // Read data rows as cell objects, preserving formulas
+  const rows = [];
+  for (let r = 1; r <= range.e.r; r++) {
+    const cells = [];
+    for (let c = 0; c <= range.e.c; c++) {
+      const ref = XLSX.utils.encode_cell({ r, c });
+      cells.push(sheet[ref] ? { ...sheet[ref] } : null);
+    }
+    rows.push({ cells, originalRow: r + 1 }); // originalRow = 1-based sheet row
+  }
+
+  // Sort descending by Tot w/ Radio value
+  if (totColIndex >= 0) {
+    rows.sort((a, b) =>
+      Number(b.cells[totColIndex]?.v ?? 0) - Number(a.cells[totColIndex]?.v ?? 0),
+    );
+  }
+
+  // Clear all data cells (keep header row 0)
+  for (let r = 1; r <= range.e.r; r++) {
+    for (let c = 0; c <= range.e.c; c++) {
+      delete sheet[XLSX.utils.encode_cell({ r, c })];
+    }
+  }
+
+  // Write rows back: update formula row refs and fix even/odd styles
+  rows.forEach(({ cells, originalRow }, rowIdx) => {
+    const newRow = rowIdx + 2; // new 1-based sheet row number
+    const isEvenRow = newRow % 2 === 0;
+
+    cells.forEach((cell, c) => {
+      if (!cell) return;
+      const ref = XLSX.utils.encode_cell({ r: rowIdx + 1, c });
+      const isNewCol = c >= INSERT_AT && c < INSERT_AT + NEW_COLS_COUNT;
+      const isPercentCol = c === INSERT_AT + NEW_COLS_COUNT - 1;
+
+      const newCell = { ...cell };
+      // Update row numbers inside formula (only non-absolute refs like F3, not $C$2)
+      if (cell.f) {
+        newCell.f = cell.f.replace(/([A-Z]+)(\d+)/g, (_, col, num) =>
+          Number(num) === originalRow ? col + newRow : col + num,
+        );
+      }
+      newCell.s = dataStyleR(isNewCol, isEvenRow, isPercentCol, c);
+      sheet[ref] = newCell;
+    });
+
+    // Update rank value (column index 2 = C)
+    const rankRef = XLSX.utils.encode_cell({ r: rowIdx + 1, c: 2 });
+    if (sheet[rankRef]) {
+      sheet[rankRef] = { ...sheet[rankRef], t: "n", v: rowIdx + 1, f: undefined };
+    }
+  });
+
   return workbook;
 }
 
