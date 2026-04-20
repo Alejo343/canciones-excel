@@ -30,6 +30,7 @@ const REQUIRED_FIELDS = [
   {
     key: "TOP",
     label: "Top",
+    optional: true,
     candidates: ["TOP", "RANKING", "RANK", "POSICION", "POSICIÓN", "POSITION"],
   },
 ];

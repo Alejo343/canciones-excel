@@ -5,7 +5,7 @@ export default function ColumnMapper({ mapping, columns, onConfirm }) {
   const [localMapping, setLocalMapping] = useState(mapping);
 
   const allMapped = REQUIRED_FIELDS.every(
-    (f) => localMapping[f.key]?.detectedCol,
+    (f) => f.optional || localMapping[f.key]?.detectedCol,
   );
 
   const handleChange = (fieldKey, col) => {
@@ -30,7 +30,6 @@ export default function ColumnMapper({ mapping, columns, onConfirm }) {
         {REQUIRED_FIELDS.map((field) => {
           const detected = localMapping[field.key];
           const isExact = detected?.score === 100;
-          const isPartial = detected?.score === 60;
           const isMissing = !detected?.detectedCol;
 
           return (
