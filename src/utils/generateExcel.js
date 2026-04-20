@@ -54,19 +54,19 @@ const COLOMBIA_ORDER = [
   "GENERO",
 ];
 
-function reorderColombia(data) {
-  return data.map((row) => {
-    const ordered = {};
-    COLOMBIA_ORDER.forEach((col) => {
-      if (col in row) ordered[col] = row[col];
-    });
-    // Agregar columnas extra que no estén en el orden definido
-    Object.keys(row).forEach((col) => {
-      if (!COLOMBIA_ORDER.includes(col)) ordered[col] = row[col];
-    });
-    return ordered;
-  });
-}
+// function reorderColombia(data) {
+//   return data.map((row) => {
+//     const ordered = {};
+//     COLOMBIA_ORDER.forEach((col) => {
+//       if (col in row) ordered[col] = row[col];
+//     });
+//     // Agregar columnas extra que no estén en el orden definido
+//     Object.keys(row).forEach((col) => {
+//       if (!COLOMBIA_ORDER.includes(col)) ordered[col] = row[col];
+//     });
+//     return ordered;
+//   });
+// }
 
 export function generateExcel(luminateData, colombiaData) {
   const workbook = XLSX.utils.book_new();
@@ -115,7 +115,7 @@ export function generateExcel(luminateData, colombiaData) {
 
   XLSX.utils.book_append_sheet(workbook, luminateSheet, "Luminate");
 
-  const colombiaSheet = XLSX.utils.json_to_sheet(reorderColombia(colombiaData));
+  const colombiaSheet = XLSX.utils.json_to_sheet(colombiaData);
   XLSX.utils.book_append_sheet(workbook, colombiaSheet, "Colombia Radio");
 
   const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });

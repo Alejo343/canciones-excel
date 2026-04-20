@@ -2,17 +2,40 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import DropZone from "../components/DropZone";
 import DataPreview from "../components/DataPreview";
+import ColumnMapper from "../components/ColumnMapper";
 import useStore from "../store/useStore";
 import { generateExcel } from "../utils/generateExcel";
+import { detectColumns, applyMapping } from "../utils/detectColumns";
 
 export default function Step1() {
   const navigate = useNavigate();
   const { luminateData, colombiaData, setLuminateData, setColombaData } =
     useStore();
+
   const [generating, setGenerating] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [rawColombia, setRawColombia] = useState(null);
+  const [mapping, setMapping] = useState(null);
+  const [columns, setColumns] = useState([]);
+  const [mappingConfirmed, setMappingConfirmed] = useState(false);
 
-  const canExport = luminateData && colombiaData;
+  const canExport = luminateData && colombiaData && mappingConfirmed;
+
+  const handleColombiLoaded = (data) => {
+    setRawColombia(data);
+    setMappingConfirmed(false);
+    setColombaData(null);
+    const detected = detectColumns(data);
+    const cols = Object.keys(data[0]);
+    setMapping(detected);
+    setColumns(cols);
+  };
+
+  const handleMappingConfirmed = (confirmedMapping) => {
+    const mapped = applyMapping(rawColombia, confirmedMapping);
+    setColombaData(mapped);
+    setMappingConfirmed(true);
+  };
 
   const handleExport = async () => {
     try {
@@ -63,10 +86,21 @@ export default function Step1() {
           </div>
           <h3 className="text-white font-semibold">Archivo Colombia Radio</h3>
         </div>
-        <DropZone onDataLoaded={setColombaData} inputId="colombia-input" />
-        {colombiaData && (
+        <DropZone onDataLoaded={handleColombiLoaded} inputId="colombia-input" />
+
+        {rawColombia && !mappingConfirmed && mapping && (
+          <div className="mt-4">
+            <ColumnMapper
+              mapping={mapping}
+              columns={columns}
+              onConfirm={handleMappingConfirmed}
+            />
+          </div>
+        )}
+
+        {mappingConfirmed && colombiaData && (
           <p className="text-sm text-green-400 mt-3">
-            ✓ {colombiaData.length} filas cargadas
+            ✓ {colombiaData.length} filas cargadas y columnas confirmadas
           </p>
         )}
       </div>
