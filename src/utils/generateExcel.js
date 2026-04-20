@@ -25,13 +25,13 @@ function colLetter(index) {
 function buildFormula(colName, rowNum) {
   switch (colName) {
     case "Radio Impact Col":
-      return `IFERROR(VLOOKUP(F${rowNum},'Colombia Radio'!$D$2:$F$97118,2,0),0)`;
+      return `IFERROR(VLOOKUP(F${rowNum},'Colombia Radio'!$C$2:$E$97118,2,0),0)`;
     case "Radio Weighted":
       return `SUM(Q${rowNum}/27)`;
     case "Played Radio Col":
-      return `IFERROR(VLOOKUP(F${rowNum},'Colombia Radio'!$D$2:$F$69000,3,0),0)`;
+      return `IFERROR(VLOOKUP(F${rowNum},'Colombia Radio'!$C$2:$E$69000,3,0),0)`;
     case "Top Radio Col":
-      return `IFERROR(VLOOKUP(F${rowNum},'Colombia Radio'!$D$2:$G$69000,4,0),0)`;
+      return `IFERROR(VLOOKUP(F${rowNum},'Colombia Radio'!$C$2:$F$69000,4,0),0)`;
     case "Consumption":
       return `SUM(J${rowNum},N${rowNum},P${rowNum})`;
     case "Tot w/ Radio":
@@ -89,7 +89,6 @@ function applySheetStyles(sheet, totalCols, totalRows, newColStart, newColEnd) {
 
 const COLOMBIA_ORDER = [
   "CODIGO",
-  "isrc_id",
   "ARTISTA",
   "CANCION",
   "IMPACTOS",
