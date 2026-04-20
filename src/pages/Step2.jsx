@@ -42,6 +42,14 @@ export default function Step2() {
   });
   const [loading, setLoading] = useState(false);
 
+  // Panel de corrección manual (override sobre cualquier fila del top 100)
+  const [overrideOpen, setOverrideOpen] = useState(false);
+  const [overrideLumQuery, setOverrideLumQuery] = useState("");
+  const [overrideLum, setOverrideLum] = useState(null); // { rowNum, title, artist, i }
+  const [overrideColQuery, setOverrideColQuery] = useState("");
+  const [overrideCol, setOverrideCol] = useState(null);
+  const [overrideLog, setOverrideLog] = useState([]);
+
   const currentRow = zeroRows[currentIndex];
   const isDone = currentIndex >= zeroRows.length;
 
@@ -111,6 +119,65 @@ export default function Step2() {
 
   const handleAbort = () => {
     handleFinish(workbook);
+  };
+
+  // — Override manual —
+  const normStr = (s) =>
+    String(s ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+
+  const top100 = (calculatedData ?? []).slice(0, 100);
+  const lumHeaders = top100.length ? Object.keys(top100[0]) : [];
+  const titleKey = lumHeaders.find((h) => h.toUpperCase() === "TITLE") ?? "TITLE";
+  const artistKey = lumHeaders.find((h) => h.toUpperCase() === "ARTIST") ?? "ARTIST";
+
+  const lumResults = overrideLumQuery.trim().length >= 1
+    ? top100
+        .map((row, i) => ({ row, i }))
+        .filter(({ row }) => {
+          const hay = normStr(row[titleKey]) + " " + normStr(row[artistKey]);
+          return hay.includes(normStr(overrideLumQuery));
+        })
+        .slice(0, 15)
+    : [];
+
+  const colResults =
+    overrideColQuery.trim().length >= 2 && colombiaData
+      ? colombiaData
+          .filter((r) => {
+            const hay = normStr(r.CANCION) + " " + normStr(r.ARTISTA);
+            return hay.includes(normStr(overrideColQuery));
+          })
+          .slice(0, 20)
+      : [];
+
+  const applyOverride = () => {
+    if (!overrideLum || !overrideCol) return;
+    const lumRow = calculatedData[overrideLum.i];
+    const headers = Object.keys(lumRow);
+    resolveRow(overrideLum.rowNum, {
+      impactos: Number(overrideCol.IMPACTOS ?? 0),
+      sonadas: Number(overrideCol.SONADAS ?? 0),
+      top: Number(overrideCol.TOP ?? 0),
+      j: Number(lumRow[headers[9]] ?? 0),
+      n: Number(lumRow[headers[13]] ?? 0),
+      p: Number(lumRow[headers[15]] ?? 0),
+    });
+    setOverrideLog((prev) => [
+      ...prev.filter((e) => e.rowNum !== overrideLum.rowNum),
+      {
+        rowNum: overrideLum.rowNum,
+        title: overrideLum.title,
+        artist: overrideLum.artist,
+        chosen: overrideCol,
+      },
+    ]);
+    setOverrideLumQuery("");
+    setOverrideLum(null);
+    setOverrideColQuery("");
+    setOverrideCol(null);
   };
 
   // — FASE UPLOAD —
@@ -384,6 +451,209 @@ export default function Step2() {
           </button>
         </div>
       )}
+
+      {/* Panel de corrección manual (override del top 100) */}
+      <div className="bg-gray-900 border border-gray-800 rounded-2xl">
+        <button
+          onClick={() => setOverrideOpen((v) => !v)}
+          className="w-full flex items-center justify-between px-6 py-4 text-left"
+        >
+          <div>
+            <p className="text-white font-semibold text-sm">
+              Corregir manualmente otra canción del top 100
+            </p>
+            <p className="text-gray-500 text-xs">
+              Cuando la fórmula eligió mal y quieres reemplazarla con otra del
+              catálogo de Colombia Radio
+            </p>
+          </div>
+          <span className="text-gray-400 text-xl">{overrideOpen ? "−" : "+"}</span>
+        </button>
+
+        {overrideOpen && (
+          <div className="border-t border-gray-800 p-6 flex flex-col gap-5">
+            {/* Paso 1: buscar canción en Luminate (top 100) */}
+            <div>
+              <p className="text-xs text-gray-400 mb-2">
+                1. Canción en Luminate (top 100)
+              </p>
+              {overrideLum ? (
+                <div className="flex items-center justify-between bg-gray-800 border border-green-700 rounded-xl px-4 py-3">
+                  <div>
+                    <p className="text-sm text-green-300 font-medium">
+                      {overrideLum.title}
+                    </p>
+                    <p className="text-xs text-gray-400">{overrideLum.artist}</p>
+                    <p className="text-[10px] text-gray-600">
+                      fila #{overrideLum.rowNum - 1}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setOverrideLum(null);
+                      setOverrideLumQuery("");
+                    }}
+                    className="text-xs text-gray-400 hover:text-white"
+                  >
+                    Cambiar
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    value={overrideLumQuery}
+                    onChange={(e) => setOverrideLumQuery(e.target.value)}
+                    placeholder="Buscar por título o artista…"
+                    className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-green-500"
+                  />
+                  {lumResults.length > 0 && (
+                    <div className="mt-2 flex flex-col gap-1 max-h-64 overflow-y-auto">
+                      {lumResults.map(({ row, i }) => (
+                        <button
+                          key={i}
+                          onClick={() =>
+                            setOverrideLum({
+                              rowNum: i + 2,
+                              i,
+                              title: row[titleKey],
+                              artist: row[artistKey],
+                            })
+                          }
+                          className="flex items-center justify-between px-3 py-2 rounded-lg border border-gray-800 bg-gray-850 hover:border-gray-600 text-left"
+                        >
+                          <div>
+                            <p className="text-xs text-gray-200">
+                              {row[titleKey]}
+                            </p>
+                            <p className="text-[10px] text-gray-500">
+                              {row[artistKey]}
+                            </p>
+                          </div>
+                          <span className="text-[10px] text-gray-600">
+                            #{i + 1}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Paso 2: buscar en Colombia Radio */}
+            {overrideLum && (
+              <div>
+                <p className="text-xs text-gray-400 mb-2">
+                  2. Reemplazar con esta canción del catálogo Colombia Radio
+                </p>
+                {overrideCol ? (
+                  <div className="flex items-center justify-between bg-gray-800 border border-orange-700 rounded-xl px-4 py-3">
+                    <div>
+                      <p className="text-sm text-orange-300 font-medium">
+                        {overrideCol.CANCION}
+                      </p>
+                      <p className="text-xs text-gray-400">{overrideCol.ARTISTA}</p>
+                      <p className="text-[10px] text-gray-500">
+                        {Number(overrideCol.IMPACTOS ?? 0).toLocaleString()} imp ·{" "}
+                        {Number(overrideCol.SONADAS ?? 0).toLocaleString()} son ·
+                        Top {overrideCol.TOP}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setOverrideCol(null);
+                        setOverrideColQuery("");
+                      }}
+                      className="text-xs text-gray-400 hover:text-white"
+                    >
+                      Cambiar
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <input
+                      type="text"
+                      value={overrideColQuery}
+                      onChange={(e) => setOverrideColQuery(e.target.value)}
+                      placeholder="Buscar en Colombia Radio (mín. 2 caracteres)…"
+                      className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-orange-500"
+                    />
+                    {colResults.length > 0 && (
+                      <div className="mt-2 flex flex-col gap-1 max-h-72 overflow-y-auto">
+                        {colResults.map((r, i) => (
+                          <button
+                            key={i}
+                            onClick={() => setOverrideCol(r)}
+                            className="flex items-center justify-between px-3 py-2 rounded-lg border border-gray-800 bg-gray-850 hover:border-gray-600 text-left"
+                          >
+                            <div>
+                              <p className="text-xs text-gray-200">{r.CANCION}</p>
+                              <p className="text-[10px] text-gray-500">
+                                {r.ARTISTA}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-3 text-[10px] text-gray-500">
+                              <span>
+                                {Number(r.IMPACTOS ?? 0).toLocaleString()} imp
+                              </span>
+                              <span>
+                                {Number(r.SONADAS ?? 0).toLocaleString()} son
+                              </span>
+                              <span>Top {r.TOP}</span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {overrideColQuery.trim().length >= 2 && colResults.length === 0 && (
+                      <p className="text-xs text-gray-500 mt-2">Sin resultados</p>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Aplicar */}
+            {overrideLum && overrideCol && (
+              <button
+                onClick={applyOverride}
+                className="w-full bg-green-500 hover:bg-green-400 text-gray-950 font-semibold py-3 rounded-xl transition-all text-sm"
+              >
+                Aplicar corrección
+              </button>
+            )}
+
+            {/* Log de overrides aplicados */}
+            {overrideLog.length > 0 && (
+              <div className="border-t border-gray-800 pt-4">
+                <p className="text-xs text-gray-500 mb-2">
+                  Correcciones aplicadas ({overrideLog.length})
+                </p>
+                <div className="flex flex-col gap-1">
+                  {overrideLog.map((e, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center justify-between text-[11px] px-3 py-2 bg-gray-850 border border-gray-800 rounded-lg"
+                    >
+                      <span className="text-gray-400">
+                        <span className="text-gray-200">{e.title}</span>
+                        <span className="text-gray-600"> → </span>
+                        <span className="text-orange-300">
+                          {e.chosen.CANCION}
+                        </span>
+                      </span>
+                      <span className="text-gray-600">
+                        {Number(e.chosen.IMPACTOS ?? 0).toLocaleString()} imp
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

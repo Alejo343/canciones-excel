@@ -320,12 +320,36 @@ export function sortByTotWithRadio(workbook) {
   const sheet = workbook.Sheets["Luminate"];
   const range = XLSX.utils.decode_range(sheet["!ref"]);
 
-  // Find "Tot w/ Radio" column index from header row
-  let totColIndex = -1;
+  // Localizar columnas por encabezado (Tot w/ Radio y sus componentes fuente)
+  const headerIdx = {};
   for (let c = 0; c <= range.e.c; c++) {
-    const cell = sheet[XLSX.utils.encode_cell({ r: 0, c })];
-    if (cell?.v === "Tot w/ Radio") { totColIndex = c; break; }
+    const v = sheet[XLSX.utils.encode_cell({ r: 0, c })]?.v;
+    if (typeof v === "string") headerIdx[v] = c;
   }
+  const totColIndex = headerIdx["Tot w/ Radio"] ?? -1;
+  const radioImpactIdx = headerIdx["Radio Impact Col"] ?? -1;
+  const weightedAudioIdx = headerIdx["WEIGHTED_AUDIO"] ?? 9;
+  const weightedVideoIdx = headerIdx["WEIGHTED_VIDEO"] ?? 13;
+  const weightedSalesIdx = headerIdx["WEIGHTED_SONG_SALES"] ?? 15;
+
+  const numOr0 = (v) => {
+    const n = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  // Tot w/ Radio = Radio Weighted + Consumption = Q/27 + J + N + P.
+  // Preferimos el valor cacheado de Excel si es un número válido; si no,
+  // lo recalculamos desde las celdas fuente (evita que filas sin cache
+  // queden con 0 y "rompan" el orden descendente).
+  const totValue = (cells) => {
+    const cached = cells[totColIndex]?.v;
+    if (typeof cached === "number" && Number.isFinite(cached)) return cached;
+    const q = numOr0(cells[radioImpactIdx]?.v);
+    const j = numOr0(cells[weightedAudioIdx]?.v);
+    const n = numOr0(cells[weightedVideoIdx]?.v);
+    const p = numOr0(cells[weightedSalesIdx]?.v);
+    return q / 27 + j + n + p;
+  };
 
   // Read data rows as cell objects, preserving formulas
   const rows = [];
@@ -335,15 +359,11 @@ export function sortByTotWithRadio(workbook) {
       const ref = XLSX.utils.encode_cell({ r, c });
       cells.push(sheet[ref] ? { ...sheet[ref] } : null);
     }
-    rows.push({ cells, originalRow: r + 1 }); // originalRow = 1-based sheet row
+    rows.push({ cells, originalRow: r + 1, sortVal: totValue(cells) });
   }
 
-  // Sort descending by Tot w/ Radio value
-  if (totColIndex >= 0) {
-    rows.sort((a, b) =>
-      Number(b.cells[totColIndex]?.v ?? 0) - Number(a.cells[totColIndex]?.v ?? 0),
-    );
-  }
+  // Sort descending by Tot w/ Radio value (calculado/cacheado)
+  rows.sort((a, b) => b.sortVal - a.sortVal);
 
   // Clear all data cells (keep header row 0)
   for (let r = 1; r <= range.e.r; r++) {
