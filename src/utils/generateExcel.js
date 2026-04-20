@@ -1,4 +1,4 @@
-import * as XLSX from "xlsx";
+import XLSX from "xlsx-js-style";
 import { saveAs } from "file-saver";
 
 const NEW_COLS = [
@@ -40,6 +40,50 @@ function buildFormula(colName, rowNum) {
       return `SUM(R${rowNum}/V${rowNum})`;
     default:
       return "";
+  }
+}
+
+const THIN_BORDER = {
+  top: { style: "thin", color: { rgb: "B0B0B0" } },
+  bottom: { style: "thin", color: { rgb: "B0B0B0" } },
+  left: { style: "thin", color: { rgb: "B0B0B0" } },
+  right: { style: "thin", color: { rgb: "B0B0B0" } },
+};
+
+function headerStyle(isNewCol) {
+  return {
+    fill: { fgColor: { rgb: isNewCol ? "C65911" : "1F4E79" } },
+    font: { bold: true, color: { rgb: "FFFFFF" }, sz: 11 },
+    alignment: { horizontal: "center", vertical: "center", wrapText: true },
+    border: THIN_BORDER,
+  };
+}
+
+function dataStyle(isNewCol, isEvenRow, isPercentCol = false) {
+  let rgb;
+  if (isNewCol) rgb = isEvenRow ? "FCE4D6" : "FFF2CC";
+  else rgb = isEvenRow ? "D9E1F2" : "FFFFFF";
+  const style = {
+    fill: { fgColor: { rgb } },
+    font: { sz: 11 },
+    alignment: { vertical: "center" },
+    border: THIN_BORDER,
+  };
+  if (isPercentCol) style.numFmt = "0.00%";
+  return style;
+}
+
+function applySheetStyles(sheet, totalCols, totalRows, newColStart, newColEnd) {
+  const radioPercentCol = newColEnd - 1;
+  for (let c = 0; c < totalCols; c++) {
+    const isNewCol = c >= newColStart && c < newColEnd;
+    const isPercentCol = c === radioPercentCol;
+    const headerRef = `${colLetter(c)}1`;
+    if (sheet[headerRef]) sheet[headerRef].s = headerStyle(isNewCol);
+    for (let r = 2; r <= totalRows + 1; r++) {
+      const cellRef = `${colLetter(c)}${r}`;
+      if (sheet[cellRef]) sheet[cellRef].s = dataStyle(isNewCol, r % 2 === 0, isPercentCol);
+    }
   }
 }
 
@@ -99,6 +143,7 @@ export function generateExcel(luminateData, colombiaData) {
     });
   });
 
+  applySheetStyles(luminateSheet, newHeaders.length, luminateData.length, insertAt, insertAt + NEW_COLS.length);
   XLSX.utils.book_append_sheet(workbook, luminateSheet, "Luminate");
 
   const reorderedColombia = colombiaData.map((row) => {

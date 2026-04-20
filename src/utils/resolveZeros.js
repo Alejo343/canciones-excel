@@ -1,5 +1,63 @@
-import * as XLSX from "xlsx";
+import XLSX from "xlsx-js-style";
 import { saveAs } from "file-saver";
+
+const INSERT_AT = 16;
+const NEW_COLS_COUNT = 7;
+
+const THIN_BORDER = {
+  top: { style: "thin", color: { rgb: "B0B0B0" } },
+  bottom: { style: "thin", color: { rgb: "B0B0B0" } },
+  left: { style: "thin", color: { rgb: "B0B0B0" } },
+  right: { style: "thin", color: { rgb: "B0B0B0" } },
+};
+
+function colLetter(index) {
+  let letter = "";
+  let n = index + 1;
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    letter = String.fromCharCode(65 + rem) + letter;
+    n = Math.floor((n - 1) / 26);
+  }
+  return letter;
+}
+
+function headerStyleR(isNewCol) {
+  return {
+    fill: { fgColor: { rgb: isNewCol ? "C65911" : "1F4E79" } },
+    font: { bold: true, color: { rgb: "FFFFFF" }, sz: 11 },
+    alignment: { horizontal: "center", vertical: "center", wrapText: true },
+    border: THIN_BORDER,
+  };
+}
+
+function dataStyleR(isNewCol, isEvenRow, isPercentCol = false) {
+  let rgb;
+  if (isNewCol) rgb = isEvenRow ? "FCE4D6" : "FFF2CC";
+  else rgb = isEvenRow ? "D9E1F2" : "FFFFFF";
+  const style = {
+    fill: { fgColor: { rgb } },
+    font: { sz: 11 },
+    alignment: { vertical: "center" },
+    border: THIN_BORDER,
+  };
+  if (isPercentCol) style.numFmt = "0.00%";
+  return style;
+}
+
+function applyLuminateStyles(sheet, totalRows, totalCols) {
+  const radioPercentCol = INSERT_AT + NEW_COLS_COUNT - 1;
+  for (let c = 0; c < totalCols; c++) {
+    const isNewCol = c >= INSERT_AT && c < INSERT_AT + NEW_COLS_COUNT;
+    const isPercentCol = c === radioPercentCol;
+    const headerRef = `${colLetter(c)}1`;
+    if (sheet[headerRef]) sheet[headerRef].s = headerStyleR(isNewCol);
+    for (let r = 2; r <= totalRows + 1; r++) {
+      const cellRef = `${colLetter(c)}${r}`;
+      if (sheet[cellRef]) sheet[cellRef].s = dataStyleR(isNewCol, r % 2 === 0, isPercentCol);
+    }
+  }
+}
 
 function normalize(str) {
   return String(str ?? "")
@@ -116,17 +174,6 @@ export function findBestMatch(title, artist, colombiaData) {
   return { best: sorted[0].row, matches };
 }
 
-function colLetter(index) {
-  let letter = "";
-  let n = index + 1;
-  while (n > 0) {
-    const rem = (n - 1) % 26;
-    letter = String.fromCharCode(65 + rem) + letter;
-    n = Math.floor((n - 1) / 26);
-  }
-  return letter;
-}
-
 export function extractZeroRows(calculatedData, colombiaData) {
   const first100 = calculatedData.slice(0, 100);
 
@@ -201,7 +248,12 @@ export function applyResolutions(workbook, resolutions) {
     directValues.forEach((val, j) => {
       const colIndex = insertAt + j;
       const cellRef = `${colLetter(colIndex)}${rowNum}`;
-      luminateSheet[cellRef] = { t: "n", v: val };
+      const isPercentCol = colIndex === INSERT_AT + NEW_COLS_COUNT - 1;
+      luminateSheet[cellRef] = {
+        t: "n",
+        v: val,
+        s: dataStyleR(true, rowNum % 2 === 0, isPercentCol),
+      };
     });
   });
 
@@ -210,15 +262,27 @@ export function applyResolutions(workbook, resolutions) {
 
 export function sortByTotWithRadio(workbook) {
   const sheet = workbook.Sheets["Luminate"];
+
+  const allRows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+  const rankColName = allRows[0]?.[2];
+  const totalCols = allRows[0]?.length ?? 0;
+
   const data = XLSX.utils.sheet_to_json(sheet);
 
   data.sort((a, b) => {
-    const aVal = Number(a["Tot w/ Radio"] ?? 0);
-    const bVal = Number(b["Tot w/ Radio"] ?? 0);
+    const aVal = Number(a["TOTAL"] ?? 0);
+    const bVal = Number(b["TOTAL"] ?? 0);
     return bVal - aVal;
   });
 
+  if (rankColName) {
+    data.forEach((row, i) => {
+      row[rankColName] = i + 1;
+    });
+  }
+
   const newSheet = XLSX.utils.json_to_sheet(data);
+  applyLuminateStyles(newSheet, data.length, totalCols);
   workbook.Sheets["Luminate"] = newSheet;
   return workbook;
 }
