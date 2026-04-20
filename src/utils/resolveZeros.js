@@ -71,28 +71,77 @@ function normalize(str) {
     .trim();
 }
 
+// Quita paréntesis/corchetes y sufijos de variante (REMIX, RMX, VERSION, etc.)
+// para obtener el "core" del título y poder comparar "CHEVERE (premium_remix)" con "CHEVERE"
+// o "Cuando No Era Cantante Remix Version" con "Cuando No Era Cantante RMX".
+function stripVariants(s) {
+  let result = s
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/[_\-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const trailingRx =
+    /\s+(REMIX|RMX|VERSION|EDIT|EXTENDED|ACOUSTIC|LIVE|PREMIUM|ORIGINAL|REMASTERED|DELUXE|BONUS|SPED UP|SLOWED|RADIO EDIT)$/;
+  while (trailingRx.test(result)) {
+    result = result.replace(trailingRx, "").trim();
+  }
+  return result;
+}
+
+function tokenize(s) {
+  return new Set(s.split(" ").filter((t) => t.length >= 2));
+}
+
+function jaccard(a, b) {
+  if (!a.size || !b.size) return 0;
+  let inter = 0;
+  for (const t of a) if (b.has(t)) inter++;
+  return inter / (a.size + b.size - inter);
+}
+
 export function findBestMatch(title, artist, colombiaData) {
   const normalTitle = normalize(title);
   const normalArtist = normalize(artist ?? "");
+  const coreTitle = stripVariants(normalTitle);
+  const coreTitleTokens = tokenize(coreTitle);
 
   function titleScore(cancion) {
     const normalCancion = normalize(cancion);
+    const coreCancion = stripVariants(normalCancion);
 
     // Match exacto
     if (normalCancion === normalTitle) return 70;
+
+    // Match exacto de la versión "core" (sin sufijos de variante / paréntesis)
+    if (coreCancion && coreTitle && coreCancion === coreTitle) return 68;
 
     // Título de Luminate contenido en Colombia Radio
     if (normalCancion.includes(normalTitle)) {
       const coverage = normalTitle.length / normalCancion.length;
       if (coverage >= 0.4) return Math.round(60 * coverage);
-      return 0;
     }
 
     // Título de Colombia Radio contenido en Luminate
     if (normalTitle.includes(normalCancion)) {
       const coverage = normalCancion.length / normalTitle.length;
       if (coverage >= 0.8) return Math.round(55 * coverage);
-      return 0;
+    }
+
+    // Contención con la versión "core"
+    if (coreCancion && coreTitle && coreTitle.length >= 4 && coreCancion.length >= 4) {
+      if (coreCancion.includes(coreTitle)) {
+        const coverage = coreTitle.length / coreCancion.length;
+        if (coverage >= 0.5) return Math.round(55 * coverage);
+      }
+      if (coreTitle.includes(coreCancion)) {
+        const coverage = coreCancion.length / coreTitle.length;
+        if (coverage >= 0.5) return Math.round(50 * coverage);
+      }
+
+      // Fallback por tokens compartidos (Jaccard) sobre el core
+      const j = jaccard(coreTitleTokens, tokenize(coreCancion));
+      if (j >= 0.6) return Math.round(55 * j);
     }
 
     return 0;
@@ -229,32 +278,37 @@ export function applyResolutions(workbook, resolutions) {
 
   Object.entries(resolutions).forEach(([rowNum, values]) => {
     const { impactos, sonadas, top } = values;
-    const radioWeighted = impactos / 27;
-    const j = Number(values.j ?? 0);
-    const n = Number(values.n ?? 0);
-    const p = Number(values.p ?? 0);
-    const consumption = j + n + p;
-    const totWithRadio = radioWeighted + consumption;
-    const radioPercent = totWithRadio !== 0 ? radioWeighted / totWithRadio : 0;
+    const rn = Number(rowNum);
 
-    const directValues = [
-      impactos,
-      radioWeighted,
-      sonadas,
-      top,
-      consumption,
-      totWithRadio,
-      radioPercent,
-    ];
+    // Solo reemplazar los 3 valores de lookup directo
+    [
+      { offset: 0, val: impactos },
+      { offset: 2, val: sonadas },
+      { offset: 3, val: top },
+    ].forEach(({ offset, val }) => {
+      const colIndex = insertAt + offset;
+      const cellRef = `${colLetter(colIndex)}${rowNum}`;
+      luminateSheet[cellRef] = {
+        t: "n",
+        v: val,
+        s: dataStyleR(true, rn % 2 === 0, false, colIndex),
+      };
+    });
 
-    directValues.forEach((val, j) => {
-      const colIndex = insertAt + j;
+    // Restaurar fórmulas en las columnas derivadas
+    [
+      { offset: 1, f: `SUM(Q${rowNum}/27)` },
+      { offset: 4, f: `SUM(J${rowNum},N${rowNum},P${rowNum})` },
+      { offset: 5, f: `SUM(R${rowNum},U${rowNum})` },
+      { offset: 6, f: `SUM(R${rowNum}/V${rowNum})` },
+    ].forEach(({ offset, f }) => {
+      const colIndex = insertAt + offset;
       const cellRef = `${colLetter(colIndex)}${rowNum}`;
       const isPercentCol = colIndex === INSERT_AT + NEW_COLS_COUNT - 1;
       luminateSheet[cellRef] = {
         t: "n",
-        v: val,
-        s: dataStyleR(true, rowNum % 2 === 0, isPercentCol, colIndex),
+        f,
+        s: dataStyleR(true, rn % 2 === 0, isPercentCol, colIndex),
       };
     });
   });
@@ -335,10 +389,31 @@ export function applyTableStyle(workbook) {
   const ref = sheet["!ref"];
   if (!ref) return workbook;
 
+  const range = XLSX.utils.decode_range(ref);
+
+  // Congelar fila de encabezado
+  sheet["!views"] = [{ state: "frozen", ySplit: 1 }];
+
+  // Altura del encabezado
+  sheet["!rows"] = [{ hpt: 32 }];
+
+  // Anchos de columna
+  const cols = [];
+  for (let c = 0; c <= range.e.c; c++) {
+    const header = sheet[XLSX.utils.encode_cell({ r: 0, c })]?.v ?? "";
+    if (["TITLE", "ARTIST", "CANCION", "ARTISTA"].includes(String(header).toUpperCase()))
+      cols.push({ wch: 32 });
+    else if (c >= INSERT_AT && c < INSERT_AT + NEW_COLS_COUNT)
+      cols.push({ wch: 16 });
+    else
+      cols.push({ wch: 13 });
+  }
+  sheet["!cols"] = cols;
+
   if (!sheet["!tables"]) sheet["!tables"] = [];
   sheet["!tables"].push({
     name: "TablHot100",
-    ref: ref,
+    ref,
     headerRow: true,
     totalsRow: false,
     style: {
