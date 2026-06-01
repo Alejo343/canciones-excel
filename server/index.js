@@ -143,5 +143,5 @@ app.post('/api/spotify-search', async (req, res) => {
   res.end();
 });
 
-const PORT = 3001;
+const PORT = 3005;
 app.listen(PORT, () => console.log(`API corriendo en http://localhost:${PORT}`));
