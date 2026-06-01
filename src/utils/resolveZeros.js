@@ -100,6 +100,12 @@ function jaccard(a, b) {
   return inter / (a.size + b.size - inter);
 }
 
+function getCol(row, name) {
+  const upper = name.toUpperCase();
+  const key = Object.keys(row).find((k) => k.toUpperCase() === upper);
+  return key ? (row[key] ?? "") : "";
+}
+
 export function findBestMatch(title, artist, colombiaData) {
   const normalTitle = normalize(title);
   const normalArtist = normalize(artist ?? "");
@@ -193,6 +199,8 @@ export function findBestMatch(title, artist, colombiaData) {
     impactos: Number(s.row["IMPACTOS"] ?? 0),
     sonadas: Number(s.row["SONADAS"] ?? 0),
     top: Number(s.row["TOP"] ?? 0),
+    codigo: getCol(s.row, "CODIGO"),
+    isrc: getCol(s.row, "ISRC"),
     score: s.score,
   }));
 
@@ -225,8 +233,22 @@ export function findBestMatch(title, artist, colombiaData) {
   return { best: sorted[0].row, matches };
 }
 
-export function extractZeroRows(calculatedData, colombiaData) {
+export function extractZeroRows(calculatedData, colombiaData, songMap = []) {
   const first100 = calculatedData.slice(0, 100);
+
+  // Índice de Colombia Radio por CODIGO para lookup directo
+  const codigoIndex = new Map();
+  for (const row of colombiaData) {
+    const cod = getCol(row, "CODIGO");
+    if (cod) codigoIndex.set(String(cod).trim(), row);
+  }
+
+  // Mapa de mappings guardados: "title|artist" (normalizado) → { isrc, codigo }
+  const knownMap = new Map();
+  for (const m of songMap) {
+    const key = normalize(m.luminate_title) + "|" + normalize(m.luminate_artist);
+    knownMap.set(key, { isrc: m.isrc, codigo: m.codigo });
+  }
 
   return first100
     .map((row, i) => {
@@ -236,6 +258,29 @@ export function extractZeroRows(calculatedData, colombiaData) {
 
       const title = row["TITLE"] ?? "";
       const artist = row["ARTIST"] ?? "";
+
+      // Intentar lookup directo por CODIGO guardado
+      const knownKey = normalize(title) + "|" + normalize(artist);
+      const known = knownMap.get(knownKey);
+      if (known?.codigo) {
+        const directRow = codigoIndex.get(String(known.codigo).trim());
+        if (directRow) {
+          const pinned = {
+            cancion: directRow["CANCION"] ?? "",
+            artista: directRow["ARTISTA"] ?? "",
+            impactos: Number(directRow["IMPACTOS"] ?? 0),
+            sonadas: Number(directRow["SONADAS"] ?? 0),
+            top: Number(directRow["TOP"] ?? 0),
+            codigo: getCol(directRow, "CODIGO"),
+            isrc: getCol(directRow, "ISRC"),
+            score: 999,
+            pinned: true,
+          };
+          return { rowNum, title, artist, best: pinned, options: [pinned], pinned: true };
+        }
+      }
+
+      // Fallback: fuzzy match por nombre + artista
       const { best, matches } = findBestMatch(title, artist, colombiaData);
 
       return {
@@ -249,6 +294,8 @@ export function extractZeroRows(calculatedData, colombiaData) {
               impactos: Number(best["IMPACTOS"] ?? 0),
               sonadas: Number(best["SONADAS"] ?? 0),
               top: Number(best["TOP"] ?? 0),
+              codigo: getCol(best, "CODIGO"),
+              isrc: getCol(best, "ISRC"),
             }
           : null,
         options: best

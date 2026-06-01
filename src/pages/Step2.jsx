@@ -11,6 +11,7 @@ import {
   getWorkbookBuffer,
   readWorkbook,
 } from "../utils/resolveZeros";
+import { fetchSongMap, saveSongMap } from "../utils/api";
 
 export default function Step2() {
   const navigate = useNavigate();
@@ -60,14 +61,16 @@ export default function Step2() {
   const handleStartReview = async () => {
     try {
       setLoading(true);
-      const {
-        workbook: wb,
-        data,
-        colombiaData: colombiaFromFile,
-      } = await readWorkbook(calculatedFile);
+      const [
+        { workbook: wb, data, colombiaData: colombiaFromFile },
+        songMap,
+      ] = await Promise.all([
+        readWorkbook(calculatedFile),
+        fetchSongMap().catch(() => []),
+      ]);
       const resolvedColombia = colombiaData ?? colombiaFromFile;
       setColombaData(resolvedColombia);
-      const zeros = extractZeroRows(data, resolvedColombia);
+      const zeros = extractZeroRows(data, resolvedColombia, songMap);
       setWorkbook(wb);
       setCalculatedData(data);
       setZeroRows(zeros);
@@ -92,6 +95,13 @@ export default function Step2() {
       n: Number(lumRow[headers[13]] ?? 0),
       p: Number(lumRow[headers[15]] ?? 0),
     });
+
+    // Guardar mapping en BD si tenemos codigo/isrc
+    if (values.codigo || values.isrc) {
+      saveSongMap(row.title, row.artist, values.isrc, values.codigo).catch(
+        (e) => console.warn("No se pudo guardar song map:", e)
+      );
+    }
 
     setManual(false);
     setManualValues({ impactos: "", sonadas: "", top: "" });
@@ -153,6 +163,11 @@ export default function Step2() {
           .slice(0, 20)
       : [];
 
+  const getColVal = (row, name) => {
+    const key = Object.keys(row).find((k) => k.toUpperCase() === name.toUpperCase());
+    return key ? (row[key] ?? "") : "";
+  };
+
   const applyOverride = () => {
     if (!overrideLum || !overrideCol) return;
     const lumRow = calculatedData[overrideLum.i];
@@ -165,6 +180,16 @@ export default function Step2() {
       n: Number(lumRow[headers[13]] ?? 0),
       p: Number(lumRow[headers[15]] ?? 0),
     });
+
+    // Guardar mapping en BD
+    const cod = getColVal(overrideCol, "CODIGO");
+    const isr = getColVal(overrideCol, "ISRC");
+    if (cod || isr) {
+      saveSongMap(overrideLum.title, overrideLum.artist, isr, cod).catch(
+        (e) => console.warn("No se pudo guardar song map:", e)
+      );
+    }
+
     setOverrideLog((prev) => [
       ...prev.filter((e) => e.rowNum !== overrideLum.rowNum),
       {
@@ -302,7 +327,9 @@ export default function Step2() {
       {!isDone ? (
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 flex flex-col gap-4">
           <div>
-            <p className="text-xs text-gray-500 mb-1">Buscando</p>
+            <p className="text-xs text-gray-500 mb-1">
+              {currentRow.pinned ? "✓ Match directo por CODIGO" : "Buscando"}
+            </p>
             <p className="text-xl font-bold text-white">{currentRow.title}</p>
             <p className="text-sm text-gray-400">{currentRow.artist}</p>
           </div>
@@ -322,6 +349,8 @@ export default function Step2() {
                           impactos: opt.impactos,
                           sonadas: opt.sonadas,
                           top: opt.top,
+                          codigo: opt.codigo,
+                          isrc: opt.isrc,
                         })
                       }
                       className={`flex items-center justify-between px-4 py-3 rounded-xl border transition-all text-left ${
