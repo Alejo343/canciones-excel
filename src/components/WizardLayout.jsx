@@ -4,6 +4,7 @@ const steps = [
   { number: 1, label: "Subir archivos", path: "/step1" },
   { number: 2, label: "Resolver zeros", path: "/step2" },
   { number: 3, label: "Reporte", path: "/step3" },
+  { number: 4, label: "Spotify", path: "/step4" },
 ];
 
 export default function WizardLayout({ children }) {

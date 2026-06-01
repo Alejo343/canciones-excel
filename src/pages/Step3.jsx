@@ -156,8 +156,20 @@ export default function Step3() {
       {/* Botones */}
       <div className="flex flex-col gap-3">
         <button
+          onClick={() => navigate("/step4")}
+          disabled={!finalBuffer}
+          className={`w-full font-semibold py-4 px-6 rounded-2xl transition-all text-lg ${
+            finalBuffer
+              ? "bg-green-500 hover:bg-green-400 text-gray-950"
+              : "bg-gray-700 text-gray-500 cursor-not-allowed"
+          }`}
+        >
+          Estandarizar nombres con Spotify →
+        </button>
+
+        <button
           onClick={handleReset}
-          className="w-full bg-green-500 hover:bg-green-400 text-gray-950 font-semibold py-4 px-6 rounded-2xl transition-all text-lg"
+          className="w-full bg-gray-900 hover:bg-gray-800 border border-gray-700 text-gray-400 font-semibold py-3 px-6 rounded-2xl transition-all text-sm"
         >
           Nuevo reporte
         </button>
