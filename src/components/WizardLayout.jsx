@@ -1,4 +1,4 @@
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, Link } from "react-router-dom";
 
 const steps = [
   { number: 1, label: "Subir archivos", path: "/step1" },
@@ -22,9 +22,15 @@ export default function WizardLayout({ children }) {
           </div>
           <span className="font-bold text-lg tracking-tight">Hot 100</span>
         </div>
-        <span className="text-sm text-gray-500">
-          Colombia · Reporte semanal
-        </span>
+        <div className="flex items-center gap-4">
+          <span className="text-sm text-gray-500">Colombia · Reporte semanal</span>
+          <Link
+            to="/admin"
+            className="text-xs text-gray-600 hover:text-gray-400 transition-colors border border-gray-800 rounded-lg px-3 py-1.5"
+          >
+            Admin
+          </Link>
+        </div>
       </header>
 
       {/* Wizard steps */}
