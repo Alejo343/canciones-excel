@@ -4,15 +4,8 @@ export default function DataPreview({ data }) {
   const columns = Object.keys(data[0]);
 
   return (
-    <div className="mt-6">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-lg font-semibold text-gray-700">Vista previa</h2>
-        <span className="text-sm text-gray-400">
-          {data.length} filas · {columns.length} columnas
-        </span>
-      </div>
-
-      <div className="overflow-x-auto rounded-xl border border-gray-200">
+    <div>
+      <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-gray-500 uppercase text-xs">
             <tr>
@@ -37,11 +30,6 @@ export default function DataPreview({ data }) {
         </table>
       </div>
 
-      {data.length > 10 && (
-        <p className="text-xs text-gray-400 mt-2 text-right">
-          Mostrando 10 de {data.length} filas
-        </p>
-      )}
     </div>
   );
 }

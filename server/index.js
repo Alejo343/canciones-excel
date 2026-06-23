@@ -55,22 +55,25 @@ app.post('/api/song-map', async (req, res) => {
   }
 });
 
-// ── spotify_names ─────────────────────────────────────────────────────────────
+// ── spotify search & cache (via songs table) ──────────────────────────────────
 
-// Devuelve el caché completo para precarga (evita llamadas Spotify para canciones ya conocidas)
 app.get('/api/spotify-names', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM spotify_names');
+    const result = await pool.query(
+      `SELECT song_id, title AS luminate_title, artist AS luminate_artist,
+              spotify_title, spotify_artist, spotify_url, cover_url
+       FROM songs WHERE spotify_url IS NOT NULL
+       ORDER BY title`,
+    );
     res.json(result.rows);
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// SSE: recibe [{title, artist}] x100, devuelve resultados uno a uno
+// SSE: recibe [{song_id, title, artist}] x100, devuelve resultados uno a uno
 app.post('/api/spotify-search', async (req, res) => {
-  const { songs } = req.body; // [{ title, artist }]
+  const { songs } = req.body;
   if (!Array.isArray(songs) || songs.length === 0) {
     return res.status(400).json({ error: 'songs[] es requerido' });
   }
@@ -82,50 +85,46 @@ app.post('/api/spotify-search', async (req, res) => {
 
   const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
-  // Precargar caché de spotify_names para este lote
-  const titles = songs.map((s) => s.title);
-  const artists = songs.map((s) => s.artist);
-
-  const cached = await pool.query(
-    `SELECT luminate_title, luminate_artist, spotify_title, spotify_artist, spotify_url, cover_url
-     FROM spotify_names
-     WHERE (luminate_title, luminate_artist) = ANY(
-       SELECT UNNEST($1::text[]), UNNEST($2::text[])
-     )`,
-    [titles, artists],
-  ).catch(() => ({ rows: [] }));
-
-  const cacheMap = new Map();
-  for (const row of cached.rows) {
-    cacheMap.set(`${row.luminate_title}|||${row.luminate_artist}`, row);
+  // Pre-upsert songs so cache lookup by song_id works
+  for (const s of songs) {
+    if (!s.song_id) continue;
+    await pool.query(
+      `INSERT INTO songs (song_id, title, artist)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (song_id) DO UPDATE SET title = EXCLUDED.title, artist = EXCLUDED.artist`,
+      [s.song_id, s.title, s.artist],
+    ).catch(() => {});
   }
 
+  // Load cache for this batch by song_id
+  const songIds = songs.map((s) => s.song_id).filter(Boolean);
+  const cached = await pool.query(
+    `SELECT song_id, spotify_title, spotify_artist, spotify_url, cover_url
+     FROM songs WHERE song_id = ANY($1) AND spotify_url IS NOT NULL`,
+    [songIds],
+  ).catch(() => ({ rows: [] }));
+
+  const cacheMap = new Map(cached.rows.map((r) => [r.song_id, r]));
+
   for (let i = 0; i < songs.length; i++) {
-    const { title, artist } = songs[i];
-    const cacheKey = `${title}|||${artist}`;
+    const { song_id, title, artist } = songs[i];
 
     send({ type: 'progress', index: i + 1, total: songs.length, song: `${title} - ${artist}` });
 
-    const hit = cacheMap.get(cacheKey);
+    const hit = song_id ? cacheMap.get(song_id) : null;
     if (hit) {
       send({
-        type: 'result',
-        index: i + 1,
-        cached: true,
+        type: 'result', index: i + 1, cached: true,
         entry: {
           rank: i + 1,
-          luminate_title: title,
-          luminate_artist: artist,
-          spotify_title: hit.spotify_title,
-          spotify_artist: hit.spotify_artist,
-          spotify_url: hit.spotify_url,
-          cover_url: hit.cover_url,
+          luminate_title: title, luminate_artist: artist,
+          spotify_title: hit.spotify_title, spotify_artist: hit.spotify_artist,
+          spotify_url: hit.spotify_url, cover_url: hit.cover_url,
         },
       });
       continue;
     }
 
-    // No está en caché → llamar Spotify
     let spotifyResult = null;
     try {
       spotifyResult = await searchTrack(title, artist);
@@ -135,22 +134,20 @@ app.post('/api/spotify-search', async (req, res) => {
 
     const entry = {
       rank: i + 1,
-      luminate_title: title,
-      luminate_artist: artist,
+      luminate_title: title, luminate_artist: artist,
       spotify_title: spotifyResult?.song ?? null,
       spotify_artist: spotifyResult?.artist ?? null,
       spotify_url: spotifyResult?.spotify ?? null,
       cover_url: spotifyResult?.cover ?? null,
     };
 
-    // Guardar en caché
-    await pool.query(
-      `INSERT INTO spotify_names (luminate_title, luminate_artist, spotify_title, spotify_artist, spotify_url, cover_url, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, NOW())
-       ON CONFLICT (luminate_title, luminate_artist)
-       DO UPDATE SET spotify_title=$3, spotify_artist=$4, spotify_url=$5, cover_url=$6, updated_at=NOW()`,
-      [title, artist, entry.spotify_title, entry.spotify_artist, entry.spotify_url, entry.cover_url],
-    ).catch((e) => console.error('[DB] Error guardando spotify_names:', e.message));
+    if (song_id) {
+      await pool.query(
+        `UPDATE songs SET spotify_title=$1, spotify_artist=$2, spotify_url=$3, cover_url=$4
+         WHERE song_id=$5`,
+        [entry.spotify_title, entry.spotify_artist, entry.spotify_url, entry.cover_url, song_id],
+      ).catch((e) => console.error('[DB] Error guardando spotify en songs:', e.message));
+    }
 
     send({ type: 'result', index: i + 1, cached: false, entry });
   }
@@ -201,15 +198,19 @@ app.put('/api/admin/song-map/:id', requireAuth, async (req, res) => {
 app.get('/api/admin/songs', requireAuth, async (req, res) => {
   const { q } = req.query;
   try {
-    let result;
-    if (q) {
-      result = await pool.query(
-        `SELECT * FROM songs WHERE title ILIKE $1 OR artist ILIKE $1 ORDER BY title LIMIT 100`,
-        [`%${q}%`],
-      );
-    } else {
-      result = await pool.query('SELECT * FROM songs ORDER BY title LIMIT 100');
-    }
+    const filter = q ? `AND (s.title ILIKE $1 OR s.artist ILIKE $1)` : '';
+    const params = q ? [`%${q}%`] : [];
+    const result = await pool.query(
+      `SELECT s.*,
+              COUNT(wt.week_start) AS week_count
+       FROM songs s
+       LEFT JOIN weekly_tops wt ON wt.song_id = s.song_id
+       WHERE TRUE ${filter}
+       GROUP BY s.song_id
+       ORDER BY s.title
+       LIMIT 100`,
+      params,
+    );
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -251,6 +252,165 @@ app.delete('/api/admin/songs/:song_id', requireAuth, async (req, res) => {
   }
 });
 
+// ── weekly ranking (wizard auto-save) ────────────────────────────────────────
+
+app.post('/api/weekly-ranking', async (req, res) => {
+  const { week_date, songs } = req.body;
+  if (!week_date || !Array.isArray(songs) || songs.length === 0) {
+    return res.status(400).json({ error: 'week_date y songs son requeridos' });
+  }
+  try {
+    for (const s of songs) {
+      const song_id = s.luminate_song_id;
+      if (!song_id) continue;
+
+      // 1. Upsert into songs catalog
+      await pool.query(
+        `INSERT INTO songs (song_id, title, artist, debut_chart_date)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (song_id) DO UPDATE SET
+           title            = EXCLUDED.title,
+           artist           = EXCLUDED.artist,
+           debut_chart_date = LEAST(COALESCE(songs.debut_chart_date, EXCLUDED.debut_chart_date), EXCLUDED.debut_chart_date)`,
+        [song_id, s.title, s.artist, week_date],
+      );
+
+      // 2. ISRC: use provided value or look up from song_map
+      let isrc = s.isrc ?? null;
+      if (!isrc) {
+        const sm = await pool.query(
+          `SELECT isrc FROM song_map WHERE lower(luminate_title) = lower($1) AND isrc IS NOT NULL LIMIT 1`,
+          [s.title],
+        );
+        if (sm.rows.length > 0) isrc = sm.rows[0].isrc;
+      }
+
+      // 3. Upsert into weekly_tops
+      await pool.query(
+        `INSERT INTO weekly_tops
+           (week_start, position, song_id, isrc, spotify_id,
+            tot_with_radio, radio_impact, consumption, radio_pct)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         ON CONFLICT (week_start, song_id) DO UPDATE SET
+           position       = EXCLUDED.position,
+           isrc           = COALESCE(EXCLUDED.isrc,       weekly_tops.isrc),
+           spotify_id     = COALESCE(EXCLUDED.spotify_id, weekly_tops.spotify_id),
+           tot_with_radio = EXCLUDED.tot_with_radio,
+           radio_impact   = EXCLUDED.radio_impact,
+           consumption    = EXCLUDED.consumption,
+           radio_pct      = EXCLUDED.radio_pct`,
+        [
+          week_date, s.position, song_id, isrc, s.spotify_id ?? null,
+          s.tot_with_radio ?? null, s.radio_impact ?? null,
+          s.consumption ?? null, s.radio_pct ?? null,
+        ],
+      );
+
+      // 4. Update peak_chart_date if this is the best position ever
+      await pool.query(
+        `UPDATE songs SET peak_chart_date = $1
+         WHERE song_id = $2
+           AND (
+             peak_chart_date IS NULL
+             OR $3 < (
+               SELECT MIN(position) FROM weekly_tops
+               WHERE song_id = $2 AND week_start != $1
+             )
+           )`,
+        [week_date, song_id, s.position],
+      );
+    }
+    res.json({ ok: true, saved: songs.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/weekly-ranking/compare', async (req, res) => {
+  try {
+    const weeksRes = await pool.query(
+      `SELECT DISTINCT week_start FROM weekly_tops ORDER BY week_start DESC LIMIT 2`,
+    );
+    if (weeksRes.rows.length < 2) {
+      return res.status(404).json({ error: 'No hay suficientes semanas para comparar' });
+    }
+    const [currentWeek, prevWeek] = weeksRes.rows.map((r) => r.week_start);
+
+    const result = await pool.query(
+      `WITH peak AS (
+         SELECT song_id,
+                MIN(position)             AS peak_pos,
+                COUNT(DISTINCT week_start) AS week_count
+         FROM weekly_tops
+         GROUP BY song_id
+       ),
+       reentry AS (
+         SELECT DISTINCT song_id
+         FROM weekly_tops
+         WHERE week_start < $2
+       )
+       SELECT
+         cur.position  AS this_week,
+         prev.position AS last_week,
+         s.title       AS song,
+         s.artist      AS artists,
+         p.peak_pos    AS posicion,
+         s.spotify_url,
+         s.cover_url,
+         p.week_count,
+         CASE
+           WHEN prev.song_id IS NULL AND re.song_id IS NOT NULL THEN 1
+           ELSE 0
+         END           AS reentry
+       FROM weekly_tops cur
+       JOIN songs s ON s.song_id = cur.song_id
+       LEFT JOIN weekly_tops prev
+              ON prev.week_start = $2
+             AND prev.song_id = cur.song_id
+       LEFT JOIN peak p    ON p.song_id = cur.song_id
+       LEFT JOIN reentry re ON re.song_id = cur.song_id
+       WHERE cur.week_start = $1
+       ORDER BY cur.position`,
+      [currentWeek, prevWeek],
+    );
+
+    res.json({ currentWeek, prevWeek, rows: result.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── admin: dashboard stats ────────────────────────────────────────────────────
+
+app.get('/api/admin/stats', requireAuth, async (req, res) => {
+  try {
+    const [songs, weeks, songMap, spotifyCache, recentWeeks] = await Promise.all([
+      pool.query('SELECT COUNT(*) AS total FROM songs'),
+      pool.query('SELECT COUNT(DISTINCT week_start) AS total FROM weekly_tops'),
+      pool.query('SELECT COUNT(*) AS total FROM song_map'),
+      pool.query('SELECT COUNT(*) AS total FROM songs WHERE spotify_url IS NOT NULL'),
+      pool.query(`
+        SELECT wt.week_start, COUNT(*) AS entries,
+               ROUND(AVG(wt.tot_with_radio)::numeric, 0) AS avg_score,
+               MIN(wt.position) AS best_pos
+        FROM weekly_tops wt
+        GROUP BY wt.week_start
+        ORDER BY wt.week_start DESC
+        LIMIT 10
+      `),
+    ]);
+    res.json({
+      totalSongs:    parseInt(songs.rows[0].total),
+      totalWeeks:    parseInt(weeks.rows[0].total),
+      totalSongMap:  parseInt(songMap.rows[0].total),
+      spotifyCache:  parseInt(spotifyCache.rows[0].total),
+      recentWeeks:   recentWeeks.rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── admin: weekly_tops ────────────────────────────────────────────────────────
 
 app.get('/api/admin/weekly-tops', requireAuth, async (req, res) => {
@@ -259,7 +419,7 @@ app.get('/api/admin/weekly-tops', requireAuth, async (req, res) => {
     let result;
     if (week) {
       result = await pool.query(
-        `SELECT wt.*, s.title, s.artist, s.genre
+        `SELECT wt.*, s.title, s.artist, s.genre, s.cover_url, s.spotify_url
          FROM weekly_tops wt LEFT JOIN songs s ON wt.song_id = s.song_id
          WHERE wt.week_start = $1 ORDER BY wt.position`,
         [week],
@@ -284,14 +444,15 @@ app.delete('/api/admin/weekly-tops/:id', requireAuth, async (req, res) => {
   }
 });
 
-// ── admin: spotify_names ──────────────────────────────────────────────────────
+// ── admin: clear spotify cache ────────────────────────────────────────────────
 
 app.delete('/api/admin/spotify-names', requireAuth, async (req, res) => {
-  const { luminate_title, luminate_artist } = req.body;
+  const { song_id } = req.body;
   try {
     await pool.query(
-      'DELETE FROM spotify_names WHERE luminate_title=$1 AND luminate_artist=$2',
-      [luminate_title, luminate_artist],
+      `UPDATE songs SET spotify_title=NULL, spotify_artist=NULL, spotify_url=NULL, cover_url=NULL
+       WHERE song_id=$1`,
+      [song_id],
     );
     res.json({ ok: true });
   } catch (err) {
@@ -301,7 +462,9 @@ app.delete('/api/admin/spotify-names', requireAuth, async (req, res) => {
 
 app.delete('/api/admin/spotify-names/all', requireAuth, async (req, res) => {
   try {
-    await pool.query('DELETE FROM spotify_names');
+    await pool.query(
+      `UPDATE songs SET spotify_title=NULL, spotify_artist=NULL, spotify_url=NULL, cover_url=NULL`,
+    );
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

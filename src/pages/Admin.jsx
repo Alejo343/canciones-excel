@@ -13,11 +13,11 @@ const API = (path, opts = {}) => {
   });
 };
 
-const TABS = ["Songs", "Weekly Tops", "Song Map", "Spotify Cache"];
+const TABS = ["Dashboard", "Songs", "Weekly Tops", "Song Map", "Spotify Cache"];
 
 export default function Admin() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState("Songs");
+  const [tab, setTab] = useState("Dashboard");
 
   useEffect(() => {
     const token = localStorage.getItem("admin_token");
@@ -78,11 +78,111 @@ export default function Admin() {
 
       {/* Content */}
       <main className="max-w-6xl mx-auto px-8 py-8">
+        {tab === "Dashboard" && <DashboardTab />}
         {tab === "Songs" && <SongsTab />}
         {tab === "Weekly Tops" && <WeeklyTopsTab />}
         {tab === "Song Map" && <SongMapTab />}
         {tab === "Spotify Cache" && <SpotifyCacheTab />}
       </main>
+    </div>
+  );
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+
+function StatCard({ label, value, sub, color = "text-white" }) {
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-2xl px-6 py-5 flex flex-col gap-1">
+      <span className="text-xs text-gray-500 uppercase tracking-wider">{label}</span>
+      <span className={`text-3xl font-bold tabular-nums ${color}`}>{value ?? "—"}</span>
+      {sub && <span className="text-xs text-gray-600">{sub}</span>}
+    </div>
+  );
+}
+
+function DashboardTab() {
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    API("/api/admin/stats")
+      .then((r) => r.json())
+      .then((data) => { setStats(data); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  if (loading) return <p className="text-gray-500 text-sm">Cargando estadísticas...</p>;
+  if (!stats) return <p className="text-red-400 text-sm">Error al cargar stats</p>;
+
+  const spotiPct = stats.totalSongs > 0
+    ? Math.round((stats.spotifyCache / stats.totalSongs) * 100)
+    : 0;
+
+  return (
+    <div className="flex flex-col gap-8">
+      <div>
+        <h2 className="text-xl font-bold mb-4">Resumen de la base de datos</h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard label="Canciones" value={stats.totalSongs.toLocaleString()} sub="en catálogo" color="text-green-400" />
+          <StatCard label="Semanas" value={stats.totalWeeks} sub="semanas históricas guardadas" />
+          <StatCard label="Song Map" value={stats.totalSongMap.toLocaleString()} sub="mapeos Luminate ↔ Radio" />
+          <StatCard
+            label="Caché Spotify"
+            value={`${spotiPct}%`}
+            sub={`${stats.spotifyCache.toLocaleString()} de ${stats.totalSongs.toLocaleString()} canciones`}
+            color={spotiPct >= 80 ? "text-green-400" : spotiPct >= 50 ? "text-yellow-400" : "text-red-400"}
+          />
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-base font-semibold text-gray-300 mb-3">Últimas 10 semanas registradas</h3>
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-800 text-gray-500 text-xs">
+                <th className="text-left px-5 py-3">Semana</th>
+                <th className="text-right px-5 py-3">Entradas</th>
+                <th className="text-right px-5 py-3">Avg Tot w/ Radio</th>
+                <th className="text-right px-5 py-3">Mejor posición</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stats.recentWeeks.map((w, i) => {
+                const date = new Date(w.week_start);
+                const label = date.toLocaleDateString("es-CO", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+                return (
+                  <tr key={w.week_start} className="border-b border-gray-800 last:border-0 hover:bg-gray-800/40">
+                    <td className="px-5 py-3 flex items-center gap-3">
+                      {i === 0 && (
+                        <span className="text-xs bg-green-500/20 text-green-400 border border-green-500/30 rounded-full px-2 py-0.5">
+                          Última
+                        </span>
+                      )}
+                      <span className="text-white font-medium">{label}</span>
+                      <span className="text-gray-600 text-xs">{w.week_start}</span>
+                    </td>
+                    <td className="px-5 py-3 text-right text-gray-400 tabular-nums">{w.entries}</td>
+                    <td className="px-5 py-3 text-right text-gray-400 tabular-nums">
+                      {w.avg_score ? Number(w.avg_score).toLocaleString() : "—"}
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      <span className="text-green-400 font-bold tabular-nums">#{w.best_pos}</span>
+                    </td>
+                  </tr>
+                );
+              })}
+              {stats.recentWeeks.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-5 py-8 text-center text-gray-600">
+                    No hay semanas registradas aún
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
@@ -129,6 +229,9 @@ function SongsTab() {
     fetchSongs();
   };
 
+  const fmtDate = (d) =>
+    d ? new Date(d).toLocaleDateString("es-CO", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" }) : "—";
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
@@ -146,14 +249,17 @@ function SongsTab() {
       {loading ? (
         <p className="text-gray-500 text-sm">Cargando...</p>
       ) : (
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-x-auto">
+          <table className="w-full text-sm min-w-[900px]">
             <thead>
               <tr className="border-b border-gray-800 text-gray-500 text-xs">
-                <th className="text-left px-4 py-3">ID</th>
-                <th className="text-left px-4 py-3">Título</th>
-                <th className="text-left px-4 py-3">Artista</th>
+                <th className="text-left px-4 py-3 w-10"></th>
+                <th className="text-left px-4 py-3">Canción</th>
                 <th className="text-left px-4 py-3">Género</th>
+                <th className="text-left px-4 py-3">Spotify</th>
+                <th className="text-left px-4 py-3">Debut</th>
+                <th className="text-left px-4 py-3">Peak</th>
+                <th className="text-right px-4 py-3">Semanas</th>
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
@@ -162,40 +268,82 @@ function SongsTab() {
                 <tr key={s.song_id} className="border-b border-gray-800 last:border-0 hover:bg-gray-800/50">
                   {editing === s.song_id ? (
                     <>
-                      <td className="px-4 py-2 text-gray-500 text-xs">{s.song_id}</td>
+                      {/* cover placeholder in edit mode */}
                       <td className="px-4 py-2">
-                        <input value={editValues.title} onChange={(e) => setEditValues((v) => ({ ...v, title: e.target.value }))}
-                          className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-white text-xs focus:outline-none focus:border-green-500" />
+                        {s.cover_url
+                          ? <img src={s.cover_url} alt="" className="w-8 h-8 rounded object-cover opacity-50" />
+                          : <div className="w-8 h-8 rounded bg-gray-800" />}
                       </td>
-                      <td className="px-4 py-2">
-                        <input value={editValues.artist} onChange={(e) => setEditValues((v) => ({ ...v, artist: e.target.value }))}
-                          className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-white text-xs focus:outline-none focus:border-green-500" />
+                      <td className="px-4 py-2" colSpan={1}>
+                        <div className="flex flex-col gap-1">
+                          <input value={editValues.title} onChange={(e) => setEditValues((v) => ({ ...v, title: e.target.value }))}
+                            placeholder="Título"
+                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-white text-xs focus:outline-none focus:border-green-500" />
+                          <input value={editValues.artist} onChange={(e) => setEditValues((v) => ({ ...v, artist: e.target.value }))}
+                            placeholder="Artista"
+                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-gray-400 text-xs focus:outline-none focus:border-green-500" />
+                        </div>
                       </td>
                       <td className="px-4 py-2">
                         <input value={editValues.genre} onChange={(e) => setEditValues((v) => ({ ...v, genre: e.target.value }))}
+                          placeholder="Género"
                           className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-white text-xs focus:outline-none focus:border-green-500" />
                       </td>
-                      <td className="px-4 py-2 flex gap-2 justify-end">
-                        <button onClick={() => handleSave(s.song_id)} className="text-xs text-green-400 hover:text-green-300 font-medium">Guardar</button>
-                        <button onClick={() => setEditing(null)} className="text-xs text-gray-500 hover:text-gray-300">Cancelar</button>
+                      <td className="px-4 py-2 text-gray-600 text-xs" colSpan={4}>
+                        <span className="font-mono">{s.song_id}</span>
+                      </td>
+                      <td className="px-4 py-2">
+                        <div className="flex gap-2 justify-end">
+                          <button onClick={() => handleSave(s.song_id)} className="text-xs text-green-400 hover:text-green-300 font-medium">Guardar</button>
+                          <button onClick={() => setEditing(null)} className="text-xs text-gray-500 hover:text-gray-300">Cancelar</button>
+                        </div>
                       </td>
                     </>
                   ) : (
                     <>
-                      <td className="px-4 py-3 text-gray-500 text-xs font-mono">{s.song_id}</td>
-                      <td className="px-4 py-3 text-white">{s.title}</td>
-                      <td className="px-4 py-3 text-gray-400">{s.artist}</td>
-                      <td className="px-4 py-3 text-gray-500">{s.genre ?? "—"}</td>
-                      <td className="px-4 py-3 flex gap-3 justify-end">
-                        <button onClick={() => handleEdit(s)} className="text-xs text-gray-400 hover:text-white">Editar</button>
-                        <button onClick={() => handleDelete(s.song_id)} className="text-xs text-red-500 hover:text-red-400">Eliminar</button>
+                      <td className="px-4 py-3">
+                        {s.cover_url
+                          ? <img src={s.cover_url} alt="" className="w-8 h-8 rounded object-cover" />
+                          : <div className="w-8 h-8 rounded bg-gray-800 flex items-center justify-center text-gray-700 text-xs">♪</div>}
+                      </td>
+                      <td className="px-4 py-3">
+                        <p className="text-white font-medium leading-tight">{s.title}</p>
+                        <p className="text-gray-500 text-xs mt-0.5">{s.artist}</p>
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 text-xs">{s.genre ?? "—"}</td>
+                      <td className="px-4 py-3">
+                        {s.spotify_url ? (
+                          <a href={s.spotify_url} target="_blank" rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-xs text-green-400 hover:text-green-300">
+                            <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" />
+                            {s.spotify_title ?? "Sí"}
+                          </a>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs text-gray-600">
+                            <span className="w-1.5 h-1.5 rounded-full bg-gray-700 inline-block" />
+                            Sin caché
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 text-xs">{fmtDate(s.debut_chart_date)}</td>
+                      <td className="px-4 py-3 text-gray-500 text-xs">{fmtDate(s.peak_chart_date)}</td>
+                      <td className="px-4 py-3 text-right">
+                        <span className={`text-xs font-medium tabular-nums ${parseInt(s.week_count) > 0 ? "text-white" : "text-gray-600"}`}>
+                          {s.week_count ?? 0}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex gap-3 justify-end">
+                          <button onClick={() => handleEdit(s)} className="text-xs text-gray-400 hover:text-white">Editar</button>
+                          <button onClick={() => handleDelete(s.song_id)} className="text-xs text-red-500 hover:text-red-400">Eliminar</button>
+                        </div>
                       </td>
                     </>
                   )}
                 </tr>
               ))}
               {songs.length === 0 && (
-                <tr><td colSpan={5} className="px-4 py-6 text-center text-gray-600 text-sm">Sin resultados</td></tr>
+                <tr><td colSpan={8} className="px-4 py-6 text-center text-gray-600 text-sm">Sin resultados</td></tr>
               )}
             </tbody>
           </table>
@@ -209,26 +357,32 @@ function SongsTab() {
 
 function WeeklyTopsTab() {
   const [weeks, setWeeks] = useState([]);
-  const [selectedWeek, setSelectedWeek] = useState(null);
+  const [weekIdx, setWeekIdx] = useState(0);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [weeksLoaded, setWeeksLoaded] = useState(false);
 
   useEffect(() => {
     API("/api/admin/weekly-tops")
       .then((r) => r.json())
       .then((data) => {
-        setWeeks(Array.isArray(data) ? data.map((d) => d.week_start) : []);
+        const list = Array.isArray(data) ? data.map((d) => d.week_start) : [];
+        setWeeks(list);
+        setWeeksLoaded(true);
+        if (list.length > 0) loadWeek(list[0], list);
       });
   }, []);
 
-  const loadWeek = async (week) => {
-    setSelectedWeek(week);
+  const loadWeek = async (week, list = weeks) => {
     setLoading(true);
     const res = await API(`/api/admin/weekly-tops?week=${week}`);
     const data = await res.json();
     setRows(Array.isArray(data) ? data : []);
+    setWeekIdx(list.indexOf(week));
     setLoading(false);
   };
+
+  const selectedWeek = weeks[weekIdx] ?? null;
 
   const handleDelete = async (id) => {
     if (!confirm("¿Eliminar esta entrada?")) return;
@@ -236,57 +390,118 @@ function WeeklyTopsTab() {
     loadWeek(selectedWeek);
   };
 
+  const fmtDate = (d) =>
+    d ? new Date(d).toLocaleDateString("es-CO", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" }) : "—";
+
+  const fmtNum = (n) => (n != null ? Number(n).toLocaleString("es-CO") : "—");
+
   return (
     <div className="flex flex-col gap-4">
-      <h2 className="text-xl font-bold">Weekly Tops</h2>
-
-      <div className="flex items-center gap-3">
-        <label className="text-sm text-gray-400">Semana:</label>
-        <select
-          value={selectedWeek ?? ""}
-          onChange={(e) => e.target.value && loadWeek(e.target.value)}
-          className="bg-gray-900 border border-gray-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-green-500"
-        >
-          <option value="">Seleccionar semana…</option>
-          {weeks.map((w) => (
-            <option key={w} value={w}>{w}</option>
-          ))}
-        </select>
+      {/* Header + navegación */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold">Weekly Tops</h2>
         {selectedWeek && (
           <span className="text-sm text-gray-500">{rows.length} entradas</span>
         )}
       </div>
 
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => weekIdx + 1 < weeks.length && loadWeek(weeks[weekIdx + 1])}
+          disabled={weekIdx + 1 >= weeks.length}
+          className="px-3 py-1.5 rounded-lg border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 disabled:opacity-30 disabled:cursor-not-allowed text-sm transition-colors"
+        >
+          ← Anterior
+        </button>
+
+        <select
+          value={selectedWeek ?? ""}
+          onChange={(e) => e.target.value && loadWeek(e.target.value)}
+          className="bg-gray-900 border border-gray-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-green-500"
+        >
+          {!weeksLoaded && <option value="">Cargando…</option>}
+          {weeks.map((w) => (
+            <option key={w} value={w}>
+              {fmtDate(w)} — {w}
+            </option>
+          ))}
+        </select>
+
+        <button
+          onClick={() => weekIdx - 1 >= 0 && loadWeek(weeks[weekIdx - 1])}
+          disabled={weekIdx - 1 < 0}
+          className="px-3 py-1.5 rounded-lg border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 disabled:opacity-30 disabled:cursor-not-allowed text-sm transition-colors"
+        >
+          Siguiente →
+        </button>
+
+        {selectedWeek && (
+          <span className="ml-2 text-xs text-gray-600">
+            semana {weeks.length - weekIdx} de {weeks.length}
+          </span>
+        )}
+      </div>
+
       {loading ? (
         <p className="text-gray-500 text-sm">Cargando...</p>
-      ) : selectedWeek && (
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
-          <table className="w-full text-sm">
+      ) : selectedWeek ? (
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-x-auto">
+          <table className="w-full text-sm min-w-[860px]">
             <thead>
               <tr className="border-b border-gray-800 text-gray-500 text-xs">
-                <th className="text-left px-4 py-3">#</th>
-                <th className="text-left px-4 py-3">Título</th>
-                <th className="text-left px-4 py-3">Artista</th>
-                <th className="text-left px-4 py-3">Género</th>
-                <th className="text-left px-4 py-3">Song ID</th>
+                <th className="text-left px-4 py-3 w-10">#</th>
+                <th className="text-left px-4 py-3 w-10"></th>
+                <th className="text-left px-4 py-3">Canción</th>
+                <th className="text-right px-4 py-3">Tot w/ Radio</th>
+                <th className="text-right px-4 py-3">Radio Impact</th>
+                <th className="text-right px-4 py-3">Consumption</th>
+                <th className="text-right px-4 py-3">Radio %</th>
+                <th className="text-left px-4 py-3">ISRC</th>
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id} className="border-b border-gray-800 last:border-0 hover:bg-gray-800/50">
-                  <td className="px-4 py-3 text-green-400 font-bold">{r.position}</td>
-                  <td className="px-4 py-3 text-white">{r.title ?? "—"}</td>
-                  <td className="px-4 py-3 text-gray-400">{r.artist ?? "—"}</td>
-                  <td className="px-4 py-3 text-gray-500">{r.genre ?? "—"}</td>
-                  <td className="px-4 py-3 text-gray-600 text-xs font-mono">{r.song_id}</td>
+                  <td className="px-4 py-3">
+                    <span className={`font-bold tabular-nums text-sm ${r.position <= 10 ? "text-green-400" : r.position <= 40 ? "text-white" : "text-gray-500"}`}>
+                      {r.position}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    {r.cover_url
+                      ? <img src={r.cover_url} alt="" className="w-8 h-8 rounded object-cover" />
+                      : <div className="w-8 h-8 rounded bg-gray-800 flex items-center justify-center text-gray-700 text-xs">♪</div>}
+                  </td>
+                  <td className="px-4 py-3">
+                    <p className="text-white font-medium leading-tight">{r.title ?? "—"}</p>
+                    <p className="text-gray-500 text-xs mt-0.5">{r.artist ?? "—"}</p>
+                  </td>
+                  <td className="px-4 py-3 text-right text-white tabular-nums font-medium">{fmtNum(r.tot_with_radio)}</td>
+                  <td className="px-4 py-3 text-right text-gray-400 tabular-nums">{fmtNum(r.radio_impact)}</td>
+                  <td className="px-4 py-3 text-right text-gray-400 tabular-nums">{fmtNum(r.consumption)}</td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {r.radio_pct != null ? (
+                      <span className={`text-xs font-medium ${Number(r.radio_pct) >= 50 ? "text-green-400" : "text-gray-400"}`}>
+                        {Number(r.radio_pct).toFixed(1)}%
+                      </span>
+                    ) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-gray-600 text-xs font-mono">{r.isrc ?? "—"}</td>
                   <td className="px-4 py-3 text-right">
                     <button onClick={() => handleDelete(r.id)} className="text-xs text-red-500 hover:text-red-400">Eliminar</button>
                   </td>
                 </tr>
               ))}
+              {rows.length === 0 && (
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-600">Sin entradas para esta semana</td></tr>
+              )}
             </tbody>
           </table>
+        </div>
+      ) : (
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8 text-center text-gray-600 text-sm">
+          {weeksLoaded ? "No hay semanas registradas aún" : "Cargando semanas…"}
         </div>
       )}
     </div>
@@ -300,6 +515,7 @@ function SongMapTab() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null);
   const [editValues, setEditValues] = useState({});
+  const [q, setQ] = useState("");
 
   const fetchRows = async () => {
     setLoading(true);
@@ -310,6 +526,18 @@ function SongMapTab() {
   };
 
   useEffect(() => { fetchRows(); }, []);
+
+  const filtered = q.trim()
+    ? rows.filter((r) => {
+        const s = q.toLowerCase();
+        return (
+          r.luminate_title?.toLowerCase().includes(s) ||
+          r.luminate_artist?.toLowerCase().includes(s) ||
+          r.isrc?.toLowerCase().includes(s) ||
+          r.codigo?.toLowerCase().includes(s)
+        );
+      })
+    : rows;
 
   const handleEdit = (row) => {
     setEditing(row.id);
@@ -332,8 +560,18 @@ function SongMapTab() {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-bold">Song Map</h2>
-        <span className="text-sm text-gray-500">{rows.length} mapeos</span>
+        <span className="text-sm text-gray-500">
+          {q ? `${filtered.length} de ${rows.length}` : `${rows.length}`} mapeos
+        </span>
       </div>
+
+      <input
+        type="text"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Filtrar por título, artista, ISRC o código…"
+        className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-green-500"
+      />
 
       {loading ? (
         <p className="text-gray-500 text-sm">Cargando...</p>
@@ -342,8 +580,8 @@ function SongMapTab() {
           Sin mapeos guardados aún
         </div>
       ) : (
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-x-auto">
+          <table className="w-full text-sm min-w-[700px]">
             <thead>
               <tr className="border-b border-gray-800 text-gray-500 text-xs">
                 <th className="text-left px-4 py-3">Luminate Title</th>
@@ -355,7 +593,7 @@ function SongMapTab() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {filtered.map((r) => (
                 <tr key={r.id} className="border-b border-gray-800 last:border-0 hover:bg-gray-800/50">
                   {editing === r.id ? (
                     <>
@@ -364,9 +602,11 @@ function SongMapTab() {
                       <td className="px-4 py-2"><input value={editValues.isrc} onChange={(e) => setEditValues((v) => ({ ...v, isrc: e.target.value }))} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-white text-xs focus:outline-none focus:border-green-500" /></td>
                       <td className="px-4 py-2"><input value={editValues.codigo} onChange={(e) => setEditValues((v) => ({ ...v, codigo: e.target.value }))} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-white text-xs focus:outline-none focus:border-green-500" /></td>
                       <td className="px-4 py-2 text-gray-600 text-xs">{r.confirmed_at ? new Date(r.confirmed_at).toLocaleDateString() : "—"}</td>
-                      <td className="px-4 py-2 flex gap-2 justify-end">
-                        <button onClick={() => handleSave(r.id)} className="text-xs text-green-400 hover:text-green-300 font-medium">Guardar</button>
-                        <button onClick={() => setEditing(null)} className="text-xs text-gray-500 hover:text-gray-300">Cancelar</button>
+                      <td className="px-4 py-2">
+                        <div className="flex gap-2 justify-end">
+                          <button onClick={() => handleSave(r.id)} className="text-xs text-green-400 hover:text-green-300 font-medium">Guardar</button>
+                          <button onClick={() => setEditing(null)} className="text-xs text-gray-500 hover:text-gray-300">Cancelar</button>
+                        </div>
                       </td>
                     </>
                   ) : (
@@ -376,14 +616,19 @@ function SongMapTab() {
                       <td className="px-4 py-3 text-gray-500 font-mono text-xs">{r.isrc ?? "—"}</td>
                       <td className="px-4 py-3 text-gray-500 font-mono text-xs">{r.codigo ?? "—"}</td>
                       <td className="px-4 py-3 text-gray-600 text-xs">{r.confirmed_at ? new Date(r.confirmed_at).toLocaleDateString() : "—"}</td>
-                      <td className="px-4 py-3 flex gap-3 justify-end">
-                        <button onClick={() => handleEdit(r)} className="text-xs text-gray-400 hover:text-white">Editar</button>
-                        <button onClick={() => handleDelete(r.id)} className="text-xs text-red-500 hover:text-red-400">Eliminar</button>
+                      <td className="px-4 py-3">
+                        <div className="flex gap-3 justify-end">
+                          <button onClick={() => handleEdit(r)} className="text-xs text-gray-400 hover:text-white">Editar</button>
+                          <button onClick={() => handleDelete(r.id)} className="text-xs text-red-500 hover:text-red-400">Eliminar</button>
+                        </div>
                       </td>
                     </>
                   )}
                 </tr>
               ))}
+              {filtered.length === 0 && (
+                <tr><td colSpan={6} className="px-4 py-6 text-center text-gray-600 text-sm">Sin resultados para "{q}"</td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -397,6 +642,7 @@ function SongMapTab() {
 function SpotifyCacheTab() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState("");
 
   const fetchRows = async () => {
     setLoading(true);
@@ -408,11 +654,23 @@ function SpotifyCacheTab() {
 
   useEffect(() => { fetchRows(); }, []);
 
+  const filtered = q.trim()
+    ? rows.filter((r) => {
+        const s = q.toLowerCase();
+        return (
+          r.luminate_title?.toLowerCase().includes(s) ||
+          r.luminate_artist?.toLowerCase().includes(s) ||
+          r.spotify_title?.toLowerCase().includes(s) ||
+          r.spotify_artist?.toLowerCase().includes(s)
+        );
+      })
+    : rows;
+
   const handleDelete = async (row) => {
     if (!confirm("¿Eliminar esta entrada del caché?")) return;
     await API("/api/admin/spotify-names", {
       method: "DELETE",
-      body: JSON.stringify({ luminate_title: row.luminate_title, luminate_artist: row.luminate_artist }),
+      body: JSON.stringify({ song_id: row.song_id }),
     });
     fetchRows();
   };
@@ -428,7 +686,9 @@ function SpotifyCacheTab() {
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-bold">Spotify Cache</h2>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-500">{rows.length} entradas</span>
+          <span className="text-sm text-gray-500">
+            {q ? `${filtered.length} de ${rows.length}` : rows.length} entradas
+          </span>
           {rows.length > 0 && (
             <button onClick={handleClearAll} className="text-xs text-red-400 hover:text-red-300 border border-red-900 rounded-lg px-3 py-1.5 transition-colors">
               Limpiar todo
@@ -436,6 +696,14 @@ function SpotifyCacheTab() {
           )}
         </div>
       </div>
+
+      <input
+        type="text"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Filtrar por título o artista…"
+        className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-green-500"
+      />
 
       {loading ? (
         <p className="text-gray-500 text-sm">Cargando...</p>
@@ -448,15 +716,21 @@ function SpotifyCacheTab() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-800 text-gray-500 text-xs">
+                <th className="text-left px-4 py-3 w-10"></th>
                 <th className="text-left px-4 py-3">Luminate</th>
                 <th className="text-left px-4 py-3">Spotify</th>
-                <th className="text-left px-4 py-3">Actualizado</th>
+                <th className="text-left px-4 py-3">Link</th>
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r, i) => (
+              {filtered.map((r, i) => (
                 <tr key={i} className="border-b border-gray-800 last:border-0 hover:bg-gray-800/50">
+                  <td className="px-4 py-3">
+                    {r.cover_url
+                      ? <img src={r.cover_url} alt="" className="w-8 h-8 rounded object-cover" />
+                      : <div className="w-8 h-8 rounded bg-gray-800 flex items-center justify-center text-gray-700 text-xs">♪</div>}
+                  </td>
                   <td className="px-4 py-3">
                     <p className="text-white">{r.luminate_title}</p>
                     <p className="text-gray-500 text-xs">{r.luminate_artist}</p>
@@ -471,14 +745,22 @@ function SpotifyCacheTab() {
                       <span className="text-gray-600 text-xs">No encontrado</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-gray-600 text-xs">
-                    {r.updated_at ? new Date(r.updated_at).toLocaleDateString() : "—"}
+                  <td className="px-4 py-3">
+                    {r.spotify_url ? (
+                      <a href={r.spotify_url} target="_blank" rel="noreferrer"
+                        className="text-xs text-green-500 hover:text-green-400 underline underline-offset-2">
+                        Abrir ↗
+                      </a>
+                    ) : "—"}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <button onClick={() => handleDelete(r)} className="text-xs text-red-500 hover:text-red-400">Eliminar</button>
                   </td>
                 </tr>
               ))}
+              {filtered.length === 0 && (
+                <tr><td colSpan={5} className="px-4 py-6 text-center text-gray-600 text-sm">Sin resultados para "{q}"</td></tr>
+              )}
             </tbody>
           </table>
         </div>
