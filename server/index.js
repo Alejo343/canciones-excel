@@ -21,7 +21,7 @@ function requireAuth(req, res, next) {
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // ── song_map ──────────────────────────────────────────────────────────────────
 
@@ -275,50 +275,52 @@ app.post('/api/weekly-ranking', async (req, res) => {
         [song_id, s.title, s.artist, week_date],
       );
 
-      // 2. ISRC: use provided value or look up from song_map
-      let isrc = s.isrc ?? null;
-      if (!isrc) {
-        const sm = await pool.query(
-          `SELECT isrc FROM song_map WHERE lower(luminate_title) = lower($1) AND isrc IS NOT NULL LIMIT 1`,
-          [s.title],
+      if (s.position != null) {
+        // 2. ISRC: use provided value or look up from song_map
+        let isrc = s.isrc ?? null;
+        if (!isrc) {
+          const sm = await pool.query(
+            `SELECT isrc FROM song_map WHERE lower(luminate_title) = lower($1) AND isrc IS NOT NULL LIMIT 1`,
+            [s.title],
+          );
+          if (sm.rows.length > 0) isrc = sm.rows[0].isrc;
+        }
+
+        // 3. Upsert into weekly_tops (only top 100 — songs with a position)
+        await pool.query(
+          `INSERT INTO weekly_tops
+             (week_start, position, song_id, isrc, spotify_id,
+              tot_with_radio, radio_impact, consumption, radio_pct)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+           ON CONFLICT (week_start, song_id) DO UPDATE SET
+             position       = EXCLUDED.position,
+             isrc           = COALESCE(EXCLUDED.isrc,       weekly_tops.isrc),
+             spotify_id     = COALESCE(EXCLUDED.spotify_id, weekly_tops.spotify_id),
+             tot_with_radio = EXCLUDED.tot_with_radio,
+             radio_impact   = EXCLUDED.radio_impact,
+             consumption    = EXCLUDED.consumption,
+             radio_pct      = EXCLUDED.radio_pct`,
+          [
+            week_date, s.position, song_id, isrc, s.spotify_id ?? null,
+            s.tot_with_radio ?? null, s.radio_impact ?? null,
+            s.consumption ?? null, s.radio_pct ?? null,
+          ],
         );
-        if (sm.rows.length > 0) isrc = sm.rows[0].isrc;
+
+        // 4. Update peak_chart_date if this is the best position ever
+        await pool.query(
+          `UPDATE songs SET peak_chart_date = $1
+           WHERE song_id = $2
+             AND (
+               peak_chart_date IS NULL
+               OR $3 < (
+                 SELECT MIN(position) FROM weekly_tops
+                 WHERE song_id = $2 AND week_start != $1
+               )
+             )`,
+          [week_date, song_id, s.position],
+        );
       }
-
-      // 3. Upsert into weekly_tops
-      await pool.query(
-        `INSERT INTO weekly_tops
-           (week_start, position, song_id, isrc, spotify_id,
-            tot_with_radio, radio_impact, consumption, radio_pct)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-         ON CONFLICT (week_start, song_id) DO UPDATE SET
-           position       = EXCLUDED.position,
-           isrc           = COALESCE(EXCLUDED.isrc,       weekly_tops.isrc),
-           spotify_id     = COALESCE(EXCLUDED.spotify_id, weekly_tops.spotify_id),
-           tot_with_radio = EXCLUDED.tot_with_radio,
-           radio_impact   = EXCLUDED.radio_impact,
-           consumption    = EXCLUDED.consumption,
-           radio_pct      = EXCLUDED.radio_pct`,
-        [
-          week_date, s.position, song_id, isrc, s.spotify_id ?? null,
-          s.tot_with_radio ?? null, s.radio_impact ?? null,
-          s.consumption ?? null, s.radio_pct ?? null,
-        ],
-      );
-
-      // 4. Update peak_chart_date if this is the best position ever
-      await pool.query(
-        `UPDATE songs SET peak_chart_date = $1
-         WHERE song_id = $2
-           AND (
-             peak_chart_date IS NULL
-             OR $3 < (
-               SELECT MIN(position) FROM weekly_tops
-               WHERE song_id = $2 AND week_start != $1
-             )
-           )`,
-        [week_date, song_id, s.position],
-      );
     }
     res.json({ ok: true, saved: songs.length });
   } catch (err) {
@@ -380,6 +382,64 @@ app.get('/api/weekly-ranking/compare', async (req, res) => {
   }
 });
 
+// ── admin: monthly ranking ────────────────────────────────────────────────────
+
+app.get('/api/admin/monthly-ranking', requireAuth, async (req, res) => {
+  const { weeks, method = 'score' } = req.query;
+  if (!weeks) return res.status(400).json({ error: 'weeks es requerido (fechas separadas por coma)' });
+  const weekList = weeks.split(',').map((w) => w.trim()).filter(Boolean);
+  if (weekList.length === 0) return res.status(400).json({ error: 'Se requiere al menos una semana' });
+  if (!['score', 'points'].includes(method)) return res.status(400).json({ error: 'method debe ser score o points' });
+
+  const scoreExpr = method === 'points'
+    ? 'SUM(101 - wt.position)'
+    : 'SUM(wt.tot_with_radio)';
+
+  try {
+    const result = await pool.query(
+      `SELECT
+         s.song_id,
+         s.title,
+         s.artist,
+         s.cover_url,
+         s.spotify_url,
+         ${scoreExpr}                    AS total_score,
+         COUNT(DISTINCT wt.week_start)   AS weeks_in_chart,
+         MIN(wt.position)                AS best_position,
+         ROUND(AVG(wt.position))         AS avg_position
+       FROM weekly_tops wt
+       JOIN songs s ON s.song_id = wt.song_id
+       WHERE wt.week_start = ANY($1::date[])
+       GROUP BY s.song_id, s.title, s.artist, s.cover_url, s.spotify_url
+       ORDER BY total_score DESC
+       LIMIT 100`,
+      [weekList],
+    );
+    res.json({ weeks: weekList, method, rows: result.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── admin: available months with their weeks ──────────────────────────────────
+
+app.get('/api/admin/monthly-ranking/months', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+         EXTRACT(YEAR  FROM week_start)::int AS year,
+         EXTRACT(MONTH FROM week_start)::int AS month,
+         ARRAY_AGG(DISTINCT week_start ORDER BY week_start) AS weeks
+       FROM weekly_tops
+       GROUP BY year, month
+       ORDER BY year DESC, month DESC`,
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── admin: dashboard stats ────────────────────────────────────────────────────
 
 app.get('/api/admin/stats', requireAuth, async (req, res) => {
@@ -392,7 +452,10 @@ app.get('/api/admin/stats', requireAuth, async (req, res) => {
       pool.query(`
         SELECT wt.week_start, COUNT(*) AS entries,
                ROUND(AVG(wt.tot_with_radio)::numeric, 0) AS avg_score,
-               MIN(wt.position) AS best_pos
+               (SELECT s.title FROM weekly_tops t
+                JOIN songs s ON s.song_id = t.song_id
+                WHERE t.week_start = wt.week_start AND t.position = 1
+                LIMIT 1) AS number_one
         FROM weekly_tops wt
         GROUP BY wt.week_start
         ORDER BY wt.week_start DESC
@@ -432,6 +495,48 @@ app.get('/api/admin/weekly-tops', requireAuth, async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/admin/weekly-tops/week/:week_start', requireAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const affected = await client.query(
+      'SELECT DISTINCT song_id FROM weekly_tops WHERE week_start = $1',
+      [req.params.week_start],
+    );
+    const songIds = affected.rows.map((r) => r.song_id);
+
+    const del = await client.query('DELETE FROM weekly_tops WHERE week_start = $1', [req.params.week_start]);
+
+    if (songIds.length > 0) {
+      // Recalculate debut and peak from remaining rows; songs with no rows → NULL
+      await client.query(
+        `UPDATE songs s
+         SET debut_chart_date = sub.debut,
+             peak_chart_date  = sub.peak_date
+         FROM (
+           SELECT sid AS song_id,
+                  MIN(wt.week_start) AS debut,
+                  (array_agg(wt.week_start ORDER BY wt.position ASC))[1] AS peak_date
+           FROM unnest($1::varchar[]) AS sid
+           LEFT JOIN weekly_tops wt ON wt.song_id = sid
+           GROUP BY sid
+         ) sub
+         WHERE s.song_id = sub.song_id`,
+        [songIds],
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json({ ok: true, deleted: del.rowCount, songs_recalculated: songIds.length });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 
