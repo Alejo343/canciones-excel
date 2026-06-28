@@ -181,7 +181,7 @@ function CargarHot100Tab() {
           method: "POST",
           body: JSON.stringify({ week_date: weekDate, songs: payload }),
         });
-      } catch (networkErr) {
+      } catch {
         throw new Error("No se pudo conectar con el servidor. Verifica que esté corriendo.");
       }
       if (res.status === 413) {
@@ -208,8 +208,11 @@ function CargarHot100Tab() {
       setPhase("spotify");
       setSpotifyResults([]);
       spotifyResultsRef.current = [];
-      setProgress({ index: 0, total: 0, song: "" });
-      const payload = songs.map(({ title, artist, luminate_song_id }) => ({
+      // Solo el top 100 (las filas con rank) se buscan en Spotify — igual que Step4.
+      // El resto de `songs` se guarda en el catálogo, pero no necesita Spotify.
+      const top100 = songs.filter((s) => s.rank != null);
+      setProgress({ index: 0, total: top100.length, song: "" });
+      const payload = top100.map(({ title, artist, luminate_song_id }) => ({
         song_id: luminate_song_id, title, artist,
       }));
       startSpotifySearch(payload, {
@@ -320,6 +323,52 @@ function CargarHot100Tab() {
                 <div className="bg-green-500 h-1.5 rounded-full transition-all duration-300" style={{ width: `${pct}%` }} />
               </div>
               {progress.song && <p className="text-[11px] text-gray-600 truncate">{progress.song}</p>}
+            </div>
+          )}
+
+          {/* Resultados Spotify en vivo */}
+          {spotifyResults.length > 0 && (
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-3 border-b border-gray-800">
+                <span className="text-gray-400 text-xs font-semibold uppercase tracking-wider">Resultados Spotify</span>
+                <span className="text-xs text-green-400">
+                  {spotifyResults.filter((r) => r.spotify_url).length} de {spotifyResults.length} encontradas
+                </span>
+              </div>
+              <div className="max-h-[480px] overflow-y-auto divide-y divide-gray-800/60">
+                {spotifyResults.map((r, i) => {
+                  const notFound = !r.spotify_url;
+                  return (
+                    <div key={i} className={`flex items-center gap-3 px-4 py-2 ${notFound ? "bg-red-950/20" : ""}`}>
+                      <div className="flex-shrink-0 w-8 h-8 rounded-lg overflow-hidden bg-gray-800 flex items-center justify-center">
+                        {r.cover_url
+                          ? <img src={r.cover_url} alt="" className="w-full h-full object-cover" />
+                          : <span className="text-gray-700 text-xs">♪</span>}
+                      </div>
+                      <span className="text-gray-600 text-xs w-5 text-right flex-shrink-0 font-mono">{r.rank}</span>
+                      <div className="flex-1 min-w-0">
+                        {r.spotify_title && r.spotify_title !== r.luminate_title ? (
+                          <div className="flex items-center gap-2 min-w-0">
+                            <p className="text-xs text-gray-500 truncate max-w-[35%]">{r.luminate_title}</p>
+                            <span className="text-gray-700 flex-shrink-0 text-xs">→</span>
+                            <p className="text-sm text-white font-medium truncate">{r.spotify_title}</p>
+                          </div>
+                        ) : (
+                          <p className={`text-sm font-medium truncate ${notFound ? "text-red-400/70" : "text-white"}`}>
+                            {r.spotify_title ?? r.luminate_title}
+                          </p>
+                        )}
+                        <p className="text-xs text-gray-500 truncate mt-0.5">{r.spotify_artist ?? r.luminate_artist}</p>
+                      </div>
+                      <div className="flex-shrink-0">
+                        {r.spotify_url
+                          ? <a href={r.spotify_url} target="_blank" rel="noreferrer" className="text-green-600 hover:text-green-400 text-xs">↗</a>
+                          : <span className="text-red-500/50 text-[10px]">no encontrado</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -439,7 +488,7 @@ function DashboardTab() {
   }, []);
 
   if (loading) return <p className="text-gray-500 text-sm">Cargando estadísticas...</p>;
-  if (!stats || !stats.totalSongs) return <p className="text-red-400 text-sm">Error al cargar stats — verificá que estés autenticado.</p>;
+  if (!stats) return <p className="text-red-400 text-sm">Error al cargar stats — verificá que el servidor esté corriendo y que estés autenticado.</p>;
 
   const spotiPct = stats.totalSongs > 0
     ? Math.round((stats.spotifyCache / stats.totalSongs) * 100)
@@ -697,6 +746,27 @@ function TopMensualTab() {
   const [loadingPoints, setLoadingPoints] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
+  const fetchMethod = useCallback(async (param, method, setRows, setLoading) => {
+    setLoading(true);
+    const res = await API(`/api/admin/monthly-ranking?weeks=${param}&method=${method}`);
+    const data = await res.json();
+    setRows(Array.isArray(data.rows) ? data.rows : []);
+    setLoading(false);
+  }, []);
+
+  const fetchBoth = useCallback((weekSet) => {
+    if (weekSet.size === 0) { setRowsPoints([]); return; }
+    const param = encodeURIComponent([...weekSet].join(","));
+    fetchMethod(param, "points", setRowsPoints, setLoadingPoints);
+  }, [fetchMethod]);
+
+  const selectMonth = useCallback((m) => {
+    setSelectedMonth(m);
+    const all = new Set(m.weeks.map((w) => String(w).slice(0, 10)));
+    setCheckedWeeks(all);
+    fetchBoth(all);
+  }, [fetchBoth]);
+
   useEffect(() => {
     API("/api/admin/monthly-ranking/months")
       .then((r) => r.json())
@@ -707,28 +777,7 @@ function TopMensualTab() {
         setLoaded(true);
       })
       .catch(() => setLoaded(true));
-  }, []);
-
-  const selectMonth = (m) => {
-    setSelectedMonth(m);
-    const all = new Set(m.weeks.map((w) => String(w).slice(0, 10)));
-    setCheckedWeeks(all);
-    fetchBoth(all);
-  };
-
-  const fetchBoth = (weekSet) => {
-    if (weekSet.size === 0) { setRowsPoints([]); return; }
-    const param = encodeURIComponent([...weekSet].join(","));
-    fetchMethod(param, "points", setRowsPoints, setLoadingPoints);
-  };
-
-  const fetchMethod = async (param, method, setRows, setLoading) => {
-    setLoading(true);
-    const res = await API(`/api/admin/monthly-ranking?weeks=${param}&method=${method}`);
-    const data = await res.json();
-    setRows(Array.isArray(data.rows) ? data.rows : []);
-    setLoading(false);
-  };
+  }, [selectMonth]);
 
   const toggleWeek = (week) => {
     setCheckedWeeks((prev) => {
@@ -1034,11 +1083,16 @@ function WeeklyTopsTab() {
   useEffect(() => {
     API("/api/admin/weekly-tops")
       .then((r) => r.json())
-      .then((data) => {
+      .then(async (data) => {
         const list = Array.isArray(data) ? data.map((d) => d.week_start) : [];
         setWeeks(list);
         setWeeksLoaded(true);
-        if (list.length > 0) loadWeek(list[0], list);
+        if (list.length > 0) {
+          const res = await API(`/api/admin/weekly-tops?week=${list[0]}`);
+          const rowsData = await res.json();
+          setRows(Array.isArray(rowsData) ? rowsData : []);
+          setWeekIdx(0);
+        }
       });
   }, []);
 
@@ -1221,7 +1275,15 @@ function SongMapTab() {
     setLoading(false);
   };
 
-  useEffect(() => { fetchRows(); }, []);
+  useEffect(() => {
+    let ignore = false;
+    (async () => {
+      const res = await API("/api/song-map");
+      const data = await res.json();
+      if (!ignore) { setRows(Array.isArray(data) ? data : []); setLoading(false); }
+    })();
+    return () => { ignore = true; };
+  }, []);
 
   const filtered = q.trim()
     ? rows.filter((r) => {
@@ -1348,7 +1410,15 @@ function SpotifyCacheTab() {
     setLoading(false);
   };
 
-  useEffect(() => { fetchRows(); }, []);
+  useEffect(() => {
+    let ignore = false;
+    (async () => {
+      const res = await API("/api/spotify-names");
+      const data = await res.json();
+      if (!ignore) { setRows(Array.isArray(data) ? data : []); setLoading(false); }
+    })();
+    return () => { ignore = true; };
+  }, []);
 
   const filtered = q.trim()
     ? rows.filter((r) => {
