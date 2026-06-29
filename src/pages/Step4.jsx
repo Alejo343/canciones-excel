@@ -36,8 +36,17 @@ function spotifyIdFromUrl(url) {
 
 const API = "http://localhost:3005";
 
+// El usuario sube el chart de la semana anterior: la fecha guardada es el
+// lunes de la semana pasada respecto a hoy (ej. hoy lunes 29 jun → 22 jun).
+function previousChartMonday(today = new Date()) {
+  const d = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+  const daysSinceMonday = (d.getUTCDay() + 6) % 7;     // 0 si hoy es lunes
+  d.setUTCDate(d.getUTCDate() - daysSinceMonday - 7);  // lunes de la semana pasada
+  return d.toISOString().slice(0, 10);
+}
+
 async function saveWeeklyRanking(songs, spotifyResults) {
-  const week_date = new Date().toISOString().slice(0, 10);
+  const week_date = previousChartMonday();
   const spotifyMap = new Map(
     (spotifyResults ?? []).map((r) => [String(r.rank), spotifyIdFromUrl(r.spotify_url)]),
   );
