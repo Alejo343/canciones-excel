@@ -107,6 +107,7 @@ export default function Step2() {
     }));
     setMatchReport(report);
     setFinalBuffer(getWorkbookBuffer(resolved));
+    downloadResolved(resolved);
     navigate("/step3");
   };
 
